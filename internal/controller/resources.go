@@ -28,7 +28,8 @@ type VesselResourceSource struct {
 // Database encapsulate atlasschema and externalsecret
 type Database struct {
 	AtlasSchema    *unstructured.Unstructured
-	ExternalSecret *unstructured.Unstructured
+	MigratorSecret *unstructured.Unstructured
+	AppSecret      *unstructured.Unstructured
 }
 
 // VesselServerResource server resource
@@ -110,6 +111,12 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 			containers[i].WithEnvFrom(corev1ac.EnvFromSource().
 				WithSecretRef(corev1ac.SecretEnvSource().
 					WithName(secret.Name)))
+		}
+	}
+
+	for _, db := range r.Server.Databases {
+		for i := range containers {
+			containers[i].WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(db.Name + "-app")))
 		}
 	}
 
@@ -195,27 +202,55 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 
 	for i, db := range r.Server.Databases {
 
-		remoteSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.SecretPath, "*", r.Server.Name)
+		remoteMigratorSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretMigratorPath, "*", r.Server.Name)
+		remoteAppSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.SecretAppPath, "*", r.Server.Name)
 
-		secretSpec := map[string]any{
+		migratorSecretSpec := map[string]any{
 			"secretStoreRef":  r.Profile.Spec.ExternalSecretsConfig.SecretStoreRef,
 			"refreshPolicy":   r.Profile.Spec.ExternalSecretsConfig.RefreshPolicy,
 			"refreshInterval": r.Profile.Spec.ExternalSecretsConfig.RefreshInterval,
 			"data": []esv1.ExternalSecretData{{
-				SecretKey: r.Profile.Spec.DatabaseConfig.SecretKey,
+				SecretKey: r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretKey,
 				RemoteRef: esv1.ExternalSecretDataRemoteRef{
-					Key:      remoteSecretKey,
-					Property: r.Profile.Spec.DatabaseConfig.SecretKey,
+					Key:      remoteMigratorSecretKey,
+					Property: r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretKey,
 				},
 			}},
 		}
 
-		newSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", db.Name, secretSpec)
+		migratorSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", db.Name+"-migrator", migratorSecretSpec)
+
+		appSecretSpec := map[string]any{
+			"secretStoreRef":  r.Profile.Spec.ExternalSecretsConfig.SecretStoreRef,
+			"refreshPolicy":   r.Profile.Spec.ExternalSecretsConfig.RefreshPolicy,
+			"refreshInterval": r.Profile.Spec.ExternalSecretsConfig.RefreshInterval,
+			"data": []esv1.ExternalSecretData{{
+				SecretKey: r.Profile.Spec.DatabaseConfig.EnvKeysPrefix + r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.HostKey,
+				RemoteRef: esv1.ExternalSecretDataRemoteRef{
+					Key:      remoteAppSecretKey,
+					Property: r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.HostKey,
+				},
+			}, {
+				SecretKey: r.Profile.Spec.DatabaseConfig.EnvKeysPrefix + r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.PasswordKey,
+				RemoteRef: esv1.ExternalSecretDataRemoteRef{
+					Key:      remoteAppSecretKey,
+					Property: r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.PasswordKey,
+				},
+			}, {
+				SecretKey: r.Profile.Spec.DatabaseConfig.EnvKeysPrefix + r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.UsernameKey,
+				RemoteRef: esv1.ExternalSecretDataRemoteRef{
+					Key:      remoteAppSecretKey,
+					Property: r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.UsernameKey,
+				},
+			}},
+		}
+
+		appSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", db.Name+"-app", appSecretSpec)
 
 		atlasSchemaSpec := map[string]any{
 			"urlFrom": atlasv1.Secret{
 				SecretKeyRef: &corev1.SecretKeySelector{
-					Key:                  r.Profile.Spec.DatabaseConfig.SecretKey,
+					Key:                  r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretKey,
 					LocalObjectReference: corev1.LocalObjectReference{Name: db.Name},
 				},
 			},
@@ -226,7 +261,8 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 
 		r.Databases[i] = &Database{
 			AtlasSchema:    r.newObject("db.atlasgo.io/v1alpha1", "AtlasSchema", db.Name, atlasSchemaSpec),
-			ExternalSecret: newSecret,
+			MigratorSecret: migratorSecret,
+			AppSecret:      appSecret,
 		}
 	}
 

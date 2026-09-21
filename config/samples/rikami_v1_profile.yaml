@@ -15,5 +15,11 @@ spec:
       name: aws-ssm
       kind: ClusterSecretStore
   databaseConfig:
-    secretPath: /clusters/pgsql/dev/*/migrator
-    secretKey: url
+    appConfig:
+      hostKey: host
+      passwordKey: password
+      usernameKey: username
+      secretAppPath: /clusters/psql/dev/*/app
+    migratorConfig:
+      secretMigratorPath: /clusters/psql/dev/*/migrator
+      secretKey: url

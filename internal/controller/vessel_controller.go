@@ -310,7 +310,12 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 
 	for _, db := range server.Databases {
 
-		err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.ExternalSecret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
+		err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.MigratorSecret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
+		if err != nil {
+			return err
+		}
+
+		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.AppSecret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 		if err != nil {
 			return err
 		}

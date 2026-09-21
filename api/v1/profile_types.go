@@ -38,12 +38,34 @@ type ExternalSecretsConfig struct {
 	SecretStoreRef *esv1.SecretStoreRef `json:"secretStoreRef,omitempty"`
 }
 
+// DatabaseAppConfig configures creation of externalsecret that would be injected as env into pods for app access to db
+type DatabaseAppConfig struct {
+	// +required
+	UsernameKey string `json:"usernameKey"`
+	// +required
+	PasswordKey string `json:"passwordKey"`
+	// +required
+	HostKey string `json:"hostKey"`
+	// +required
+	SecretAppPath string `json:"secretAppPath"`
+}
+
+// DatabaseMigratorConfig configures creation of externalsecret that would be used by atlasschema to get the pg url
+type DatabaseMigratorConfig struct {
+	// +required
+	SecretMigratorPath string `json:"secretMigratorPath"`
+	// +required
+	SecretKey string `json:"secretKey"`
+}
+
 // DatabaseConfig determines default parameters to create external secret containing pg url login for atlas migration/schema role
 type DatabaseConfig struct {
 	// +required
-	SecretPath string `json:"secretPath"`
+	DatabaseAppConfig DatabaseAppConfig `json:"appConfig"`
 	// +required
-	SecretKey string `json:"secretKey"`
+	DatabaseMigratorConfig DatabaseMigratorConfig `json:"migratorConfig"`
+	// +kubebuilder:default=db_
+	EnvKeysPrefix string `json:"envKeysPrefix"`
 }
 
 // ProfileSpec defines the desired state of Profile
