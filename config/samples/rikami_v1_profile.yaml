@@ -1,0 +1,19 @@
+apiVersion: rikami.zagoapps.com/v1
+kind: Profile
+metadata:
+  name: default
+  namespace: dev
+spec:
+  # TODO(user): Add fields here
+  gateway: dev-gateway
+  pullPolicy: Always
+  domain: pve.zagoapps.com
+  externalSecretsConfig:
+    refreshPolicy: CreatedOnce
+    refreshInterval: 0s
+    secretStoreRef:
+      name: aws-ssm
+      kind: ClusterSecretStore
+  databaseConfig:
+    secretPath: /clusters/pgsql/dev/*/migrator
+    secretKey: url

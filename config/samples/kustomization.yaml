@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- rikami_v1_vessel.yaml
+- rikami_v1_profile.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

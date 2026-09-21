@@ -1,0 +1,35 @@
+apiVersion: rikami.zagoapps.com/v1
+kind: Vessel
+metadata:
+  name: simple-api
+  namespace: dev
+spec:
+  # TODO(user): Add fields here
+  servers:
+    - image: ghcr.io/b-zago/simple-test-api/webserver:1.0.8
+      port: 8000
+      name: simple-api
+      externalSecrets:
+        - name: simple-api
+          data:
+            - secretKey: SECRET1
+              key: /clusters/secrets/dev/simple-api
+              property: SECRET1
+            - secretKey: SECRET2
+              key: /clusters/secrets/dev/simple-api
+              property: SECRET2
+            - secretKey: ENV1
+              key: /clusters/secrets/dev/simple-api
+              property: SECRET2
+            - secretKey: ENV2
+              key: /clusters/secrets/dev/simple-api
+              property: SECRET2
+      databases:
+        - name: simple-api-database
+          schema: |
+            CREATE TABLE IF NOT EXISTS scores (
+              id SERIAL PRIMARY KEY,
+              player VARCHAR(50),
+              score INTEGER,
+              created_at TIMESTAMP DEFAULT NOW()
+            )
