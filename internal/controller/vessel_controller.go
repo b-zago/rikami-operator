@@ -24,6 +24,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -69,6 +70,8 @@ type VesselReconciler struct {
 // +kubebuilder:rbac:groups=db.atlasgo.io,resources=atlasschemas,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -287,6 +290,7 @@ func (r *VesselReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&gwv1.HTTPRoute{}).
 		Owns(&esv1.ExternalSecret{}).
 		Owns(&atlasv1.AtlasSchema{}).
+		Owns(&batchv1.Job{}).
 		Complete(r)
 }
 
@@ -299,6 +303,7 @@ func (r *VesselReconciler) updateStatus(ctx context.Context, v *rikamiv1.Vessel,
 	return nil
 }
 
+// respect order of the resources applied (wait for them to be healthy) later - for now it sorts itself out over time
 func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource) error {
 	for _, secret := range server.ExternalSecrets {
 
@@ -324,6 +329,15 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 		if err != nil {
 			return err
 		}
+
+		// optional
+		if db.SeedJob != nil {
+			err = r.Apply(ctx, db.SeedJob, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
+			if err != nil {
+				return err
+			}
+		}
+
 	}
 
 	err := r.Apply(ctx, server.Deployment, client.FieldOwner(FieldOwnerName), client.ForceOwnership)

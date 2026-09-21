@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	appsv1ac "k8s.io/client-go/applyconfigurations/apps/v1"
+	batchv1ac "k8s.io/client-go/applyconfigurations/batch/v1"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -30,6 +31,7 @@ type Database struct {
 	AtlasSchema    *unstructured.Unstructured
 	MigratorSecret *unstructured.Unstructured
 	AppSecret      *unstructured.Unstructured
+	SeedJob        *batchv1ac.JobApplyConfiguration
 }
 
 // VesselServerResource server resource
@@ -202,8 +204,8 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 
 	for i, db := range r.Server.Databases {
 
-		remoteMigratorSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretMigratorPath, "*", r.Server.Name)
-		remoteAppSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.SecretAppPath, "*", r.Server.Name)
+		remoteMigratorSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretMigratorPath, "*", db.Name)
+		remoteAppSecretKey := strings.ReplaceAll(r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.SecretAppPath, "*", db.Name)
 
 		migratorSecretSpec := map[string]any{
 			"secretStoreRef":  r.Profile.Spec.ExternalSecretsConfig.SecretStoreRef,
@@ -218,7 +220,8 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 			}},
 		}
 
-		migratorSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", db.Name+"-migrator", migratorSecretSpec)
+		migratorSecretName := db.Name + "-migrator"
+		migratorSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", migratorSecretName, migratorSecretSpec)
 
 		appSecretSpec := map[string]any{
 			"secretStoreRef":  r.Profile.Spec.ExternalSecretsConfig.SecretStoreRef,
@@ -244,14 +247,14 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 				},
 			}},
 		}
-
+		appSecretName := db.Name + "-app"
 		appSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", db.Name+"-app", appSecretSpec)
 
 		atlasSchemaSpec := map[string]any{
 			"urlFrom": atlasv1.Secret{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					Key:                  r.Profile.Spec.DatabaseConfig.DatabaseMigratorConfig.SecretKey,
-					LocalObjectReference: corev1.LocalObjectReference{Name: db.Name},
+					LocalObjectReference: corev1.LocalObjectReference{Name: migratorSecretName},
 				},
 			},
 			"schema": atlasv1.Schema{
@@ -264,6 +267,49 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 			MigratorSecret: migratorSecret,
 			AppSecret:      appSecret,
 		}
+
+		// optionals
+
+		// seed job
+
+		if db.Seed != nil {
+			seedJob := batchv1ac.Job(db.Name, r.Vessel.Namespace).
+				WithOwnerReferences(metav1ac.OwnerReference().
+					WithAPIVersion(rikamiv1.GroupVersion.String()).
+					WithKind("Vessel").
+					WithName(r.Vessel.Name).
+					WithUID(r.Vessel.UID).
+					WithController(true).
+					WithBlockOwnerDeletion(true)).
+				WithLabels(labels).
+				WithSpec(batchv1ac.JobSpec().
+					WithBackoffLimit(5).
+					WithTemplate(corev1ac.PodTemplateSpec().
+						WithSpec(corev1ac.PodSpec().
+							WithRestartPolicy(corev1.RestartPolicyOnFailure).
+							WithContainers(corev1ac.Container().
+								WithName("seed").
+								WithImage("postgres:17-alpine").
+								WithEnvFrom(corev1ac.EnvFromSource().
+									WithSecretRef(corev1ac.SecretEnvSource().
+										WithName(appSecretName))).
+								WithEnv(corev1ac.EnvVar().
+									WithName("PGPASSWORD").
+									WithValueFrom(corev1ac.EnvVarSource().
+										WithSecretKeyRef(corev1ac.SecretKeySelector().
+											WithName(appSecretName).
+											WithKey(r.Profile.Spec.DatabaseConfig.EnvKeysPrefix+r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.PasswordKey)))).
+								WithCommand("psql").
+								WithArgs(
+									"-h", "$("+r.Profile.Spec.DatabaseConfig.EnvKeysPrefix+r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.HostKey+")",
+									"-U", "$("+r.Profile.Spec.DatabaseConfig.EnvKeysPrefix+r.Profile.Spec.DatabaseConfig.DatabaseAppConfig.UsernameKey+")",
+									"-d", db.Name,
+									"-v", "ON_ERROR_STOP=1",
+									"-c", *db.Seed,
+								)))))
+			r.Databases[i].SeedJob = seedJob
+		}
+
 	}
 
 	return r

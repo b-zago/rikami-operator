@@ -19,7 +19,7 @@ spec:
       hostKey: host
       passwordKey: password
       usernameKey: username
-      secretAppPath: /clusters/psql/dev/*/app
+      secretAppPath: /clusters/pgsql/dev/*/app
     migratorConfig:
-      secretMigratorPath: /clusters/psql/dev/*/migrator
+      secretMigratorPath: /clusters/pgsql/dev/*/migrator
       secretKey: url

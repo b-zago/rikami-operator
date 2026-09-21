@@ -13,19 +13,19 @@ spec:
         - name: simple-api
           data:
             - secretKey: SECRET1
-              key: /clusters/secrets/dev/simple-api
+              key: /clusters/dev/simple-api
               property: SECRET1
             - secretKey: SECRET2
-              key: /clusters/secrets/dev/simple-api
+              key: /clusters/dev/simple-api
               property: SECRET2
             - secretKey: ENV1
-              key: /clusters/secrets/dev/simple-api
+              key: /clusters/dev/simple-api
               property: SECRET2
             - secretKey: ENV2
-              key: /clusters/secrets/dev/simple-api
+              key: /clusters/dev/simple-api
               property: SECRET2
       databases:
-        - name: simple-api-database
+        - name: simple-api
           schema: |
             CREATE TABLE IF NOT EXISTS scores (
               id SERIAL PRIMARY KEY,
@@ -33,3 +33,12 @@ spec:
               score INTEGER,
               created_at TIMESTAMP DEFAULT NOW()
             )
+          seed: |
+            INSERT INTO scores (player, score) VALUES
+              ('alice', 1200),
+              ('bob', 950),
+              ('charlie', 1480),
+              ('diana', 870),
+              ('eve', 1320),
+              ('alice', 1510),
+              ('bob', 1100);

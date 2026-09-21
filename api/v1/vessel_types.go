@@ -58,6 +58,8 @@ type Database struct {
 	Name string `json:"name"`
 	// +required
 	Schema string `json:"schema"`
+	// +optional
+	Seed *string `json:"seed,omitempty"`
 }
 
 // VesselServer will apply

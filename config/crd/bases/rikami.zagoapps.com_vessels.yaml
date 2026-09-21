@@ -59,6 +59,8 @@ spec:
                             type: string
                           schema:
                             type: string
+                          seed:
+                            type: string
                         required:
                         - name
                         - schema

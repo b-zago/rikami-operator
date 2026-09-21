@@ -124,6 +124,11 @@ func (v *Vessel) GetOwnedGVKList() []schema.GroupVersionKind {
 				Version: "v1alpha1",
 				Kind:    "AtlasSchemaList",
 			},
+			{
+				Group:   "batch",
+				Version: "v1",
+				Kind:    "JobList",
+			},
 		}
 	}
 	return list

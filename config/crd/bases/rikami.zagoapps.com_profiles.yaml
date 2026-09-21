@@ -44,13 +44,43 @@ spec:
                   external secret containing pg url login for atlas migration/schema
                   role
                 properties:
-                  secretKey:
+                  appConfig:
+                    description: DatabaseAppConfig configures creation of externalsecret
+                      that would be injected as env into pods for app access to db
+                    properties:
+                      hostKey:
+                        type: string
+                      passwordKey:
+                        type: string
+                      secretAppPath:
+                        type: string
+                      usernameKey:
+                        type: string
+                    required:
+                    - hostKey
+                    - passwordKey
+                    - secretAppPath
+                    - usernameKey
+                    type: object
+                  envKeysPrefix:
+                    default: db_
                     type: string
-                  secretPath:
-                    type: string
+                  migratorConfig:
+                    description: DatabaseMigratorConfig configures creation of externalsecret
+                      that would be used by atlasschema to get the pg url
+                    properties:
+                      secretKey:
+                        type: string
+                      secretMigratorPath:
+                        type: string
+                    required:
+                    - secretKey
+                    - secretMigratorPath
+                    type: object
                 required:
-                - secretKey
-                - secretPath
+                - appConfig
+                - envKeysPrefix
+                - migratorConfig
                 type: object
               domain:
                 minLength: 4
