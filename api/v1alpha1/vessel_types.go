@@ -109,6 +109,9 @@ type VesselServer struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=16
 	Services []VesselService `json:"services,omitempty"`
+
+	// +kubebuilder:default=false
+	RootDomain bool `json:"rootDomain,omitempty"`
 }
 
 type VesselService struct {

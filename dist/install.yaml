@@ -1213,6 +1213,9 @@ spec:
                             More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                           type: object
                       type: object
+                    rootDomain:
+                      default: false
+                      type: boolean
                     services:
                       description: |-
                         Services have full capabilities of Servers but without HTTPRoute being
@@ -2544,7 +2547,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: ghcr.io/b-zago/rikami-operator:0.3.5
+        image: ghcr.io/b-zago/rikami-operator:0.3.6
         livenessProbe:
           httpGet:
             path: /healthz

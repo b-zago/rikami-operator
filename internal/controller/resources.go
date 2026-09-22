@@ -63,6 +63,7 @@ type VesselServerResource struct {
 	ExternalSecrets []*unstructured.Unstructured
 	Databases       []*Database
 	Services        []rikamiv1.VesselService
+	RootDomain      bool
 }
 
 func NewServer(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer) *VesselServerResource {
@@ -71,8 +72,9 @@ func NewServer(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer
 			Profile: p,
 			Vessel:  v,
 		},
-		Server:   &s.VesselWorkload,
-		Services: s.Services,
+		Server:     &s.VesselWorkload,
+		Services:   s.Services,
+		RootDomain: s.RootDomain,
 	}
 	res.Build(false)
 	return res
@@ -169,7 +171,9 @@ func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
 
 	if !isService {
 		var hostname string
-		if r.Profile.Spec.NamespacedSubdomain {
+		if r.RootDomain {
+			hostname = r.Profile.Spec.Domain
+		} else if r.Profile.Spec.NamespacedSubdomain {
 			hostname = r.Vessel.Name + "." + r.Vessel.Namespace + "." + r.Profile.Spec.Domain
 		} else {
 			hostname = r.Vessel.Name + "." + r.Profile.Spec.Domain

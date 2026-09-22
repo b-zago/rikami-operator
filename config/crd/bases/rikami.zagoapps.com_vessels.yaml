@@ -508,6 +508,9 @@ spec:
                             More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                           type: object
                       type: object
+                    rootDomain:
+                      default: false
+                      type: boolean
                     services:
                       description: |-
                         Services have full capabilities of Servers but without HTTPRoute being
