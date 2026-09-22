@@ -63,12 +63,10 @@ type Database struct {
 	Seed *string `json:"seed,omitempty"`
 }
 
-// VesselServer will apply
-// deployment
-// service
-// httproute
-type VesselServer struct {
+// VesselWorkload holds the fields shared by servers and services.
+type VesselWorkload struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
 	// +required
 	Name string `json:"name"`
 	// +kubebuilder:validation:MinLength=1
@@ -79,7 +77,6 @@ type VesselServer struct {
 
 	// +optional
 	UseProfileProbes *bool `json:"useProfileProbes,omitempty"`
-
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +optional
@@ -95,10 +92,27 @@ type VesselServer struct {
 	// +optional
 	EnvSecretRefs []string `json:"envSecretRefs,omitempty"`
 	// +optional
+	// +listType=map
+	// +listMapKey=name
 	Databases []Database `json:"databases,omitempty"`
-	// Services have full capabilities of Servers but without HTTPRoute being applied so good for in cluster sidecar-like use
+}
+
+// VesselServer encapsulates everything
+// +kubebuilder:validation:XValidation:rule="!has(self.services) || self.services.all(s, s.name != self.name)",message="service names must differ from the server name"
+type VesselServer struct {
+	VesselWorkload `json:",inline"`
+
+	// Services have full capabilities of Servers but without HTTPRoute being
+	// applied, so good for in-cluster sidecar-like use.
 	// +optional
-	Services []VesselServer `json:"services,omitempty"`
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	Services []VesselService `json:"services,omitempty"`
+}
+
+type VesselService struct {
+	VesselWorkload `json:",inline"`
 }
 
 // VesselSpec defines the desired state of Vessel
@@ -112,6 +126,7 @@ type VesselSpec struct {
 	Profile string `json:"profile"`
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
 	// +optional
 	Servers []*VesselServer `json:"servers,omitempty"`
 

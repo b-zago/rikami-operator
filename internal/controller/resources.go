@@ -10,6 +10,7 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	appsv1ac "k8s.io/client-go/applyconfigurations/apps/v1"
 	batchv1ac "k8s.io/client-go/applyconfigurations/batch/v1"
@@ -18,6 +19,23 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gwv1ac "sigs.k8s.io/gateway-api/applyconfiguration/apis/v1"
 )
+
+// needed for pruning
+type appliedSet map[string]struct{}
+
+func appliedKey(gk schema.GroupKind, name string) string {
+	return gk.String() + "/" + name
+}
+
+func (s appliedSet) add(apiVersion, kind, name string) {
+	gv, _ := schema.ParseGroupVersion(apiVersion)
+	s[appliedKey(gv.WithKind(kind).GroupKind(), name)] = struct{}{}
+}
+
+func (s appliedSet) has(gk schema.GroupKind, name string) bool {
+	_, ok := s[appliedKey(gk, name)]
+	return ok
+}
 
 // resources types
 
@@ -38,12 +56,13 @@ type Database struct {
 // VesselServerResource server resource
 type VesselServerResource struct {
 	*VesselResourceSource
-	Server          *rikamiv1.VesselServer
+	Server          *rikamiv1.VesselWorkload
 	Deployment      *appsv1ac.DeploymentApplyConfiguration
 	Service         *corev1ac.ServiceApplyConfiguration
 	HTTPRoute       *gwv1ac.HTTPRouteApplyConfiguration
 	ExternalSecrets []*unstructured.Unstructured
 	Databases       []*Database
+	Services        []rikamiv1.VesselService
 }
 
 func NewServer(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer) *VesselServerResource {
@@ -52,20 +71,21 @@ func NewServer(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer
 			Profile: p,
 			Vessel:  v,
 		},
-		Server: s,
+		Server:   &s.VesselWorkload,
+		Services: s.Services,
 	}
 	res.Build(false)
 	return res
 }
 
 // NewService as separate func for readability and ease of use
-func NewService(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer) *VesselServerResource {
+func NewService(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselService) *VesselServerResource {
 	res := &VesselServerResource{
 		VesselResourceSource: &VesselResourceSource{
 			Profile: p,
 			Vessel:  v,
 		},
-		Server: s,
+		Server: &s.VesselWorkload,
 	}
 	res.Build(true)
 	return res

@@ -28,9 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/utils/ptr"
@@ -84,6 +82,7 @@ type VesselReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+	applied := appliedSet{}
 
 	vessel := &rikamiv1.Vessel{}
 	err := r.Get(ctx, req.NamespacedName, vessel)
@@ -134,7 +133,7 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	for _, server := range vessel.Spec.Servers {
 		srv := NewServer(vessel, profile, server)
-		if err := r.applyServer(ctx, srv, false); err != nil {
+		if err := r.applyServer(ctx, srv, false, applied); err != nil {
 			log.Error(err, "failed to apply server", "server", server.Name)
 			applyErrs = append(applyErrs, fmt.Errorf("server %s: %w", server.Name, err))
 			failedNames = append(failedNames, server.Name)
@@ -156,7 +155,7 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// end SSA
 	// encapsulate into a func later too
 
-	if err := r.prune(ctx, vessel); err != nil {
+	if err := r.prune(ctx, vessel, applied); err != nil {
 		log.Error(err, "failed to prune orphaned resources")
 		original = vessel.DeepCopy()
 		vessel.SetStatusFullyDegraded(ctx, &rikamiv1.VesselNewStatusInfo{
@@ -304,13 +303,14 @@ func (r *VesselReconciler) updateStatus(ctx context.Context, v *rikamiv1.Vessel,
 }
 
 // respect order of the resources applied (wait for them to be healthy) later - for now it sorts itself out over time
-func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource, isService bool) error {
+func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource, isService bool, applied appliedSet) error {
 	for _, secret := range server.ExternalSecrets {
 
 		err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(secret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 		if err != nil {
 			return err
 		}
+		applied.add(secret.GetAPIVersion(), secret.GetKind(), secret.GetName())
 	}
 
 	for _, db := range server.Databases {
@@ -320,15 +320,21 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 			return err
 		}
 
+		applied.add(db.MigratorSecret.GetAPIVersion(), db.MigratorSecret.GetKind(), db.MigratorSecret.GetName())
+
 		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.AppSecret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 		if err != nil {
 			return err
 		}
 
+		applied.add(db.AppSecret.GetAPIVersion(), db.AppSecret.GetKind(), db.AppSecret.GetName())
+
 		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.AtlasSchema), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 		if err != nil {
 			return err
 		}
+
+		applied.add(db.AtlasSchema.GetAPIVersion(), db.AtlasSchema.GetKind(), db.AtlasSchema.GetName())
 
 		// optional
 		if db.SeedJob != nil {
@@ -336,49 +342,51 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 			if err != nil {
 				return err
 			}
+
+			applied.add(*db.SeedJob.APIVersion, *db.SeedJob.Kind, *db.SeedJob.Name)
 		}
 
 	}
 
-	for _, service := range server.Server.Services {
+	for _, service := range server.Services {
 		newService := NewService(server.Vessel, server.Profile, &service)
-		r.applyServer(ctx, newService, true)
+		err := r.applyServer(ctx, newService, true, applied)
+		if err != nil {
+			return err
+		}
 	}
 
 	err := r.Apply(ctx, server.Deployment, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 	if err != nil {
 		return err
 	}
+
+	applied.add(*server.Deployment.APIVersion, *server.Deployment.Kind, *server.Deployment.Name)
+
 	err = r.Apply(ctx, server.Service, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 	if err != nil {
 		return err
 	}
+
+	applied.add(*server.Service.APIVersion, *server.Service.Kind, *server.Service.Name)
+
 	if !isService {
 		err = r.Apply(ctx, server.HTTPRoute, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 		if err != nil {
 			return err
 		}
+
+		applied.add(*server.HTTPRoute.APIVersion, *server.HTTPRoute.Kind, *server.HTTPRoute.Name)
+
 	}
 	return nil
 }
 
-func (r *VesselReconciler) prune(ctx context.Context, v *rikamiv1.Vessel) error {
-	vesselReq, err := labels.NewRequirement(vesselLabel, selection.Equals, []string{v.Name})
-	if err != nil {
-		return err
-	}
-	sel := labels.NewSelector().Add(*vesselReq)
+func (r *VesselReconciler) prune(ctx context.Context, v *rikamiv1.Vessel, applied appliedSet) error {
+	log := logf.FromContext(ctx)
 
-	if len(v.Spec.Servers) > 0 {
-		specServers := make([]string, len(v.Spec.Servers))
-		for idx, server := range v.Spec.Servers {
-			specServers[idx] = server.Name
-		}
-		serverReq, err := labels.NewRequirement(serverLabel, selection.NotIn, specServers)
-		if err != nil {
-			return err
-		}
-		sel = sel.Add(*serverReq)
+	if len(applied) == 0 && len(v.Spec.Servers) > 0 {
+		return fmt.Errorf("refusing to prune: applied set empty with %d servers in spec", len(v.Spec.Servers))
 	}
 
 	var errs []error
@@ -389,7 +397,7 @@ func (r *VesselReconciler) prune(ctx context.Context, v *rikamiv1.Vessel) error 
 		if err := r.List(
 			ctx, list,
 			client.InNamespace(v.Namespace),
-			client.MatchingLabelsSelector{Selector: sel},
+			client.MatchingLabels{vesselLabel: v.Name},
 		); err != nil {
 			errs = append(errs, fmt.Errorf("listing %s: %w", gvk.Kind, err))
 			continue
@@ -397,9 +405,17 @@ func (r *VesselReconciler) prune(ctx context.Context, v *rikamiv1.Vessel) error 
 
 		for i := range list.Items {
 			obj := &list.Items[i]
+
+			if applied.has(obj.GroupVersionKind().GroupKind(), obj.GetName()) {
+				continue // we just applied this, keep it
+			}
+
+			log.Info("pruning orphaned resource",
+				"kind", obj.GetKind(), "name", obj.GetName())
+
 			err := r.Delete(ctx, obj, client.Preconditions{UID: ptr.To(obj.GetUID())})
 			if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-				errs = append(errs, fmt.Errorf("deleting %s %s: %w", gvk.Kind, obj.GetName(), err))
+				errs = append(errs, fmt.Errorf("deleting %s %s: %w", obj.GetKind(), obj.GetName(), err))
 			}
 		}
 	}
