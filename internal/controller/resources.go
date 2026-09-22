@@ -139,6 +139,10 @@ func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
 				WithSpec(corev1ac.PodSpec().
 					WithContainers(container))))
 
+	if r.Profile.Spec.PullSecret != nil {
+		r.Deployment.Spec.Template.Spec.WithImagePullSecrets(corev1ac.LocalObjectReference().WithName(*r.Profile.Spec.PullSecret))
+	}
+
 	var svcPort int32
 
 	if isService {
