@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -77,6 +78,17 @@ type VesselServer struct {
 	Port int32 `json:"port"`
 
 	// +optional
+	UseProfileProbes *bool `json:"useProfileProbes,omitempty"`
+
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// +optional
+	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
+	// +optional
+	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
+	// +optional
+	LivenessProbe *corev1.Probe `json:"livenessProbe,omitempty"`
+	// +optional
 	ExternalSecrets []ExternalSecret `json:"externalSecrets,omitempty"`
 	// +optional
 	Envs map[string]string `json:"envs,omitempty"`
@@ -84,6 +96,9 @@ type VesselServer struct {
 	EnvSecretRefs []string `json:"envSecretRefs,omitempty"`
 	// +optional
 	Databases []Database `json:"databases,omitempty"`
+	// Services have full capabilities of Servers but without HTTPRoute being applied so good for in cluster sidecar-like use
+	// +optional
+	Services []VesselServer `json:"services,omitempty"`
 }
 
 // VesselSpec defines the desired state of Vessel
@@ -99,6 +114,9 @@ type VesselSpec struct {
 	// +listMapKey=name
 	// +optional
 	Servers []*VesselServer `json:"servers,omitempty"`
+
+	// +kubebuilder:default=false
+	UseProfileProbes bool `json:"useProfileProbes"`
 }
 
 // VesselStatus defines the observed state of Vessel.

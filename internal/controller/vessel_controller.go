@@ -134,7 +134,7 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	for _, server := range vessel.Spec.Servers {
 		srv := NewServer(vessel, profile, server)
-		if err := r.applyServer(ctx, srv); err != nil {
+		if err := r.applyServer(ctx, srv, false); err != nil {
 			log.Error(err, "failed to apply server", "server", server.Name)
 			applyErrs = append(applyErrs, fmt.Errorf("server %s: %w", server.Name, err))
 			failedNames = append(failedNames, server.Name)
@@ -304,7 +304,7 @@ func (r *VesselReconciler) updateStatus(ctx context.Context, v *rikamiv1.Vessel,
 }
 
 // respect order of the resources applied (wait for them to be healthy) later - for now it sorts itself out over time
-func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource) error {
+func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource, isService bool) error {
 	for _, secret := range server.ExternalSecrets {
 
 		err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(secret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
@@ -340,6 +340,11 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 
 	}
 
+	for _, service := range server.Server.Services {
+		newService := NewService(server.Vessel, server.Profile, &service)
+		r.applyServer(ctx, newService, true)
+	}
+
 	err := r.Apply(ctx, server.Deployment, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 	if err != nil {
 		return err
@@ -348,9 +353,11 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 	if err != nil {
 		return err
 	}
-	err = r.Apply(ctx, server.HTTPRoute, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-	if err != nil {
-		return err
+	if !isService {
+		err = r.Apply(ctx, server.HTTPRoute, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

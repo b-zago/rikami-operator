@@ -2,6 +2,7 @@ package controller
 
 import (
 	"cmp"
+	"encoding/json"
 	"strings"
 
 	atlasv1 "github.com/ariga/atlas-operator/api/v1alpha1"
@@ -53,7 +54,20 @@ func NewServer(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer
 		},
 		Server: s,
 	}
-	res.Build()
+	res.Build(false)
+	return res
+}
+
+// NewService as separate func for readability and ease of use
+func NewService(v *rikamiv1.Vessel, p *rikamiv1.Profile, s *rikamiv1.VesselServer) *VesselServerResource {
+	res := &VesselServerResource{
+		VesselResourceSource: &VesselResourceSource{
+			Profile: p,
+			Vessel:  v,
+		},
+		Server: s,
+	}
+	res.Build(true)
 	return res
 }
 
@@ -81,8 +95,12 @@ func (r *VesselServerResource) newObject(apiVersion, kind, name string, spec map
 	}}
 }
 
-func (r *VesselServerResource) Build() *VesselServerResource {
+func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
+	appDBSecretSuffix := "-app"
+	migratorDBSecretSuffix := "-migrator"
 	labels := map[string]string{vesselLabel: r.Vessel.Name, serverLabel: r.Server.Name}
+
+	container := r.buildContainer(appDBSecretSuffix)
 
 	r.Deployment = appsv1ac.Deployment(r.Server.Name, r.Vessel.Namespace).
 		WithOwnerReferences(metav1ac.OwnerReference().
@@ -99,27 +117,14 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 			WithTemplate(corev1ac.PodTemplateSpec().
 				WithLabels(labels).
 				WithSpec(corev1ac.PodSpec().
-					WithContainers(corev1ac.Container().
-						WithName(r.Vessel.Name).
-						WithImage(r.Server.Image).
-						WithImagePullPolicy(r.Profile.Spec.PullPolicy).
-						WithPorts(corev1ac.ContainerPort().
-							WithContainerPort(r.Server.Port))))))
+					WithContainers(container))))
 
-	// deployments additions
-	containers := r.Deployment.Spec.Template.Spec.Containers
-	for _, secret := range r.Server.ExternalSecrets {
-		for i := range containers {
-			containers[i].WithEnvFrom(corev1ac.EnvFromSource().
-				WithSecretRef(corev1ac.SecretEnvSource().
-					WithName(secret.Name)))
-		}
-	}
+	var svcPort int32
 
-	for _, db := range r.Server.Databases {
-		for i := range containers {
-			containers[i].WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(db.Name + "-app")))
-		}
+	if isService {
+		svcPort = r.Server.Port
+	} else {
+		svcPort = r.Profile.Spec.DefaultServicePort
 	}
 
 	r.Service = corev1ac.Service(r.Server.Name, r.Vessel.Namespace).
@@ -135,38 +140,40 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 			WithSelector(labels).
 			WithType(corev1.ServiceTypeClusterIP).
 			WithPorts(corev1ac.ServicePort().
-				WithPort(80).
+				WithPort(svcPort).
 				WithTargetPort(intstr.IntOrString{Type: intstr.Int, IntVal: r.Server.Port})))
 
-	var hostname string
-	if r.Profile.Spec.NamespacedSubdomain {
-		hostname = r.Vessel.Name + "." + r.Vessel.Namespace + "." + r.Profile.Spec.Domain
-	} else {
-		hostname = r.Vessel.Name + "." + r.Profile.Spec.Domain
-	}
+	if !isService {
+		var hostname string
+		if r.Profile.Spec.NamespacedSubdomain {
+			hostname = r.Vessel.Name + "." + r.Vessel.Namespace + "." + r.Profile.Spec.Domain
+		} else {
+			hostname = r.Vessel.Name + "." + r.Profile.Spec.Domain
+		}
 
-	r.HTTPRoute = gwv1ac.HTTPRoute(r.Server.Name, r.Vessel.Namespace).
-		WithOwnerReferences(metav1ac.OwnerReference().
-			WithAPIVersion(rikamiv1.GroupVersion.String()).
-			WithKind("Vessel").
-			WithName(r.Vessel.Name).
-			WithUID(r.Vessel.UID).
-			WithController(true).
-			WithBlockOwnerDeletion(true)).
-		WithLabels(labels).
-		WithSpec(gwv1ac.HTTPRouteSpec().
-			WithParentRefs(gwv1ac.ParentReference().
-				WithKind(gwv1.Kind("Gateway")).
-				WithName(gwv1.ObjectName(r.Profile.Spec.Gateway))).
-			WithHostnames(gwv1.Hostname(hostname)).
-			WithRules(gwv1ac.HTTPRouteRule().
-				WithMatches(gwv1ac.HTTPRouteMatch().
-					WithPath(gwv1ac.HTTPPathMatch().
-						WithType(gwv1.PathMatchType("PathPrefix")).
-						WithValue("/"))).
-				WithBackendRefs(gwv1ac.HTTPBackendRef().
-					WithName(gwv1.ObjectName(r.Server.Name)).
-					WithPort(80))))
+		r.HTTPRoute = gwv1ac.HTTPRoute(r.Server.Name, r.Vessel.Namespace).
+			WithOwnerReferences(metav1ac.OwnerReference().
+				WithAPIVersion(rikamiv1.GroupVersion.String()).
+				WithKind("Vessel").
+				WithName(r.Vessel.Name).
+				WithUID(r.Vessel.UID).
+				WithController(true).
+				WithBlockOwnerDeletion(true)).
+			WithLabels(labels).
+			WithSpec(gwv1ac.HTTPRouteSpec().
+				WithParentRefs(gwv1ac.ParentReference().
+					WithKind(gwv1.Kind("Gateway")).
+					WithName(gwv1.ObjectName(r.Profile.Spec.Gateway))).
+				WithHostnames(gwv1.Hostname(hostname)).
+				WithRules(gwv1ac.HTTPRouteRule().
+					WithMatches(gwv1ac.HTTPRouteMatch().
+						WithPath(gwv1ac.HTTPPathMatch().
+							WithType(gwv1.PathMatchType("PathPrefix")).
+							WithValue("/"))).
+					WithBackendRefs(gwv1ac.HTTPBackendRef().
+						WithName(gwv1.ObjectName(r.Server.Name)).
+						WithPort(80))))
+	}
 
 	r.ExternalSecrets = make([]*unstructured.Unstructured, len(r.Server.ExternalSecrets))
 
@@ -220,7 +227,7 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 			}},
 		}
 
-		migratorSecretName := db.Name + "-migrator"
+		migratorSecretName := db.Name + migratorDBSecretSuffix
 		migratorSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", migratorSecretName, migratorSecretSpec)
 
 		appSecretSpec := map[string]any{
@@ -247,7 +254,7 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 				},
 			}},
 		}
-		appSecretName := db.Name + "-app"
+		appSecretName := db.Name + appDBSecretSuffix
 		appSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", db.Name+"-app", appSecretSpec)
 
 		atlasSchemaSpec := map[string]any{
@@ -313,4 +320,65 @@ func (r *VesselServerResource) Build() *VesselServerResource {
 	}
 
 	return r
+}
+
+func (r *VesselServerResource) buildContainer(appDBSecretSuffix string) *corev1ac.ContainerApplyConfiguration {
+	container := corev1ac.Container().
+		WithName(r.Vessel.Name).
+		WithImage(r.Server.Image).
+		WithImagePullPolicy(r.Profile.Spec.PullPolicy).
+		WithPorts(corev1ac.ContainerPort().
+			WithContainerPort(r.Server.Port))
+
+	for _, secret := range r.Server.ExternalSecrets {
+		container.WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(secret.Name)))
+	}
+
+	for _, db := range r.Server.Databases {
+		container.WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(db.Name + appDBSecretSuffix)))
+	}
+
+	for k, v := range r.Server.Envs {
+		container.WithEnv(corev1ac.EnvVar().WithName(k).WithValue(v))
+	}
+
+	for _, ref := range r.Server.EnvSecretRefs {
+		container.WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(ref)))
+	}
+
+	useProbes := r.Vessel.Spec.UseProfileProbes
+	if r.Server.UseProfileProbes != nil {
+		useProbes = *r.Server.UseProfileProbes
+	}
+
+	if useProbes {
+		container.
+			WithStartupProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](cmp.Or(r.Server.StartupProbe, r.Profile.Spec.StartupProbe))).
+			WithStartupProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](cmp.Or(r.Server.ReadinessProbe, r.Profile.Spec.ReadinessProbe))).
+			WithStartupProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](cmp.Or(r.Server.LivenessProbe, r.Profile.Spec.LivenessProbe)))
+	} else {
+		container.
+			WithStartupProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](r.Server.StartupProbe)).
+			WithReadinessProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](r.Server.ReadinessProbe)).
+			WithLivenessProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](r.Server.LivenessProbe))
+	}
+
+	container.WithResources(toApplyConfig[corev1ac.ResourceRequirementsApplyConfiguration](r.Server.Resources))
+
+	return container
+}
+
+// toApplyConfig converts a core API type into its apply configuration
+// equivalent via a JSON round-trip. Both types share the same JSON shape,
+// and apply configurations use pointers with omitempty, so unset fields
+// stay nil and won't be owned by our field manager.
+// Note: explicit zero values in non-pointer, omitempty fields are dropped.
+func toApplyConfig[AC any, T any](in *T) *AC {
+	if in == nil {
+		return nil
+	}
+	data, _ := json.Marshal(in)
+	out := new(AC)
+	_ = json.Unmarshal(data, out)
+	return out
 }

@@ -94,6 +94,15 @@ type ProfileSpec struct {
 	ExternalSecretsConfig ExternalSecretsConfig `json:"externalSecretsConfig"`
 	// +required
 	DatabaseConfig DatabaseConfig `json:"databaseConfig"`
+	// +kubebuilder:default=80
+	DefaultServicePort int32 `json:"defaultServicePort"`
+
+	// +optional
+	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
+	// +optional
+	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
+	// +optional
+	LivenessProbe *corev1.Probe `json:"livenessProbe,omitempty"`
 }
 
 // ProfileStatus defines the observed state of Profile.
