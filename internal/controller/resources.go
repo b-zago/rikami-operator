@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	atlasv1 "github.com/ariga/atlas-operator/api/v1alpha1"
-	rikamiv1 "github.com/b-zago/rikami-operator/api/v1"
+	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

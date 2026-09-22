@@ -1,4 +1,4 @@
-apiVersion: rikami.zagoapps.com/v1
+apiVersion: rikami.zagoapps.com/v1alpha1
 kind: Profile
 metadata:
   name: default

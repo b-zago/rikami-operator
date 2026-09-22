@@ -35,7 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	rikamiv1 "github.com/b-zago/rikami-operator/api/v1"
+	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
 	"github.com/b-zago/rikami-operator/internal/controller"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 

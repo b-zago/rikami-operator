@@ -33,7 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	rikamiv1 "github.com/b-zago/rikami-operator/api/v1"
+	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 

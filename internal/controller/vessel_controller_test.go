@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	rikamiv1 "github.com/b-zago/rikami-operator/api/v1"
+	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
 )
 
 var _ = Describe("Vessel Controller", func() {

@@ -6,7 +6,7 @@ cliVersion: 4.15.0
 domain: zagoapps.com
 layout:
 - go.kubebuilder.io/v4
-projectName: rikami-controller
+projectName: rikami
 repo: github.com/b-zago/rikami-operator
 resources:
 - api:
@@ -16,14 +16,14 @@ resources:
   domain: zagoapps.com
   group: rikami
   kind: Vessel
-  path: github.com/b-zago/rikami-operator/api/v1
-  version: v1
+  path: github.com/b-zago/rikami-operator/api/v1alpha1
+  version: v1alpha1
 - api:
     crdVersion: v1
     namespaced: true
   domain: zagoapps.com
   group: rikami
   kind: Profile
-  path: github.com/b-zago/rikami-operator/api/v1
-  version: v1
+  path: github.com/b-zago/rikami-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
