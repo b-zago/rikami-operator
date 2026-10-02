@@ -102,6 +102,11 @@ func (in *ExternalSecret) DeepCopyInto(out *ExternalSecret) {
 		*out = make([]ExternalSecretData, len(*in))
 		copy(*out, *in)
 	}
+	if in.Extract != nil {
+		in, out := &in.Extract, &out.Extract
+		*out = new(string)
+		**out = **in
+	}
 	if in.RefreshPolicy != nil {
 		in, out := &in.RefreshPolicy, &out.RefreshPolicy
 		*out = new(v1.ExternalSecretRefreshPolicy)

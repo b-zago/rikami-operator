@@ -38,11 +38,16 @@ type ExternalSecretData struct {
 }
 
 // ExternalSecret type to work with ESO
+// +kubebuilder:validation:XValidation:rule="has(self.data) != has(self.extract)",message="exactly one of data or extract must be specified"
 type ExternalSecret struct {
 	// +required
 	Name string `json:"name"`
-	// +required
-	Data []ExternalSecretData `json:"data"`
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	Data []ExternalSecretData `json:"data,omitempty"`
+
+	// +optional
+	Extract *string `json:"extract,omitempty"`
 
 	// +optional
 	// +kubebuilder:validation:Enum=CreatedOnce;Periodic;OnChange

@@ -211,22 +211,36 @@ func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
 		secretStoreRef := cmp.Or(secret.SecretStoreRef, r.Profile.Spec.ExternalSecretsConfig.SecretStoreRef)
 
 		data := make([]esv1.ExternalSecretData, len(secret.Data))
+		isDataFrom := false
 
-		for i, d := range secret.Data {
-			data[i] = esv1.ExternalSecretData{
-				SecretKey: d.SecretKey,
-				RemoteRef: esv1.ExternalSecretDataRemoteRef{
-					Key:      d.Key,
-					Property: d.Property,
-				},
+		if secret.Data != nil {
+			for i, d := range secret.Data {
+				data[i] = esv1.ExternalSecretData{
+					SecretKey: d.SecretKey,
+					RemoteRef: esv1.ExternalSecretDataRemoteRef{
+						Key:      d.Key,
+						Property: d.Property,
+					},
+				}
 			}
+		} else {
+			isDataFrom = true
 		}
 
 		secretSpec := map[string]any{
 			"secretStoreRef":  *secretStoreRef,
 			"refreshPolicy":   *refreshPolicy,
 			"refreshInterval": *refreshInterval,
-			"data":            data,
+		}
+
+		if isDataFrom {
+			secretSpec["dataFrom"] = []esv1.ExternalSecretDataFromRemoteRef{{
+				Extract: &esv1.ExternalSecretDataRemoteRef{
+					Key: *secret.Extract,
+				},
+			}}
+		} else {
+			secretSpec["data"] = data
 		}
 
 		newSecret := r.newObject("external-secrets.io/v1", "ExternalSecret", secret.Name, secretSpec)

@@ -93,7 +93,10 @@ spec:
                               - property
                               - secretKey
                               type: object
+                            minItems: 1
                             type: array
+                          extract:
+                            type: string
                           name:
                             type: string
                           refreshInterval:
@@ -126,9 +129,11 @@ spec:
                                 type: string
                             type: object
                         required:
-                        - data
                         - name
                         type: object
+                        x-kubernetes-validations:
+                        - message: exactly one of data or extract must be specified
+                          rule: has(self.data) != has(self.extract)
                       type: array
                     image:
                       minLength: 1
@@ -564,7 +569,10 @@ spec:
                                     - property
                                     - secretKey
                                     type: object
+                                  minItems: 1
                                   type: array
+                                extract:
+                                  type: string
                                 name:
                                   type: string
                                 refreshInterval:
@@ -597,9 +605,11 @@ spec:
                                       type: string
                                   type: object
                               required:
-                              - data
                               - name
                               type: object
+                              x-kubernetes-validations:
+                              - message: exactly one of data or extract must be specified
+                                rule: has(self.data) != has(self.extract)
                             type: array
                           image:
                             minLength: 1
