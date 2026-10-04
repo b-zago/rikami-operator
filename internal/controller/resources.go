@@ -3,6 +3,8 @@ package controller
 import (
 	"cmp"
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 
 	atlasv1 "github.com/ariga/atlas-operator/api/v1alpha1"
@@ -380,8 +382,8 @@ func (r *VesselServerResource) buildContainer(appDBSecretSuffix string) *corev1a
 		container.WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(db.Name + appDBSecretSuffix)))
 	}
 
-	for k, v := range r.Server.Envs {
-		container.WithEnv(corev1ac.EnvVar().WithName(k).WithValue(v))
+	for _, k := range slices.Sorted(maps.Keys(r.Server.Envs)) {
+		container.WithEnv(corev1ac.EnvVar().WithName(k).WithValue(r.Server.Envs[k]))
 	}
 
 	for _, ref := range r.Server.EnvSecretRefs {
