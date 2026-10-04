@@ -407,7 +407,16 @@ func (r *VesselServerResource) buildContainer(appDBSecretSuffix string) *corev1a
 			WithLivenessProbe(toApplyConfig[corev1ac.ProbeApplyConfiguration](r.Server.LivenessProbe))
 	}
 
-	container.WithResources(toApplyConfig[corev1ac.ResourceRequirementsApplyConfiguration](r.Server.Resources))
+	useResources := r.Vessel.Spec.UseProfileResources
+	if r.Server.UseProfileResources != nil {
+		useResources = *r.Server.UseProfileResources
+	}
+
+	if useResources {
+		container.WithResources(toApplyConfig[corev1ac.ResourceRequirementsApplyConfiguration](cmp.Or(r.Server.Resources, r.Profile.Spec.Resources)))
+	} else {
+		container.WithResources(toApplyConfig[corev1ac.ResourceRequirementsApplyConfiguration](r.Server.Resources))
+	}
 
 	return container
 }

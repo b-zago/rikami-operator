@@ -83,6 +83,8 @@ type VesselWorkload struct {
 	// +optional
 	UseProfileProbes *bool `json:"useProfileProbes,omitempty"`
 	// +optional
+	UseProfileResources *bool `json:"useProfileResources,omitempty"`
+	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +optional
 	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
@@ -140,6 +142,8 @@ type VesselSpec struct {
 
 	// +kubebuilder:default=false
 	UseProfileProbes bool `json:"useProfileProbes"`
+	// +kubebuilder:default=false
+	UseProfileResources bool `json:"useProfileResources,omitempty"`
 }
 
 // VesselStatus defines the observed state of Vessel.

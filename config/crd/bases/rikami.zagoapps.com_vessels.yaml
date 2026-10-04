@@ -1152,6 +1152,8 @@ spec:
                             type: object
                           useProfileProbes:
                             type: boolean
+                          useProfileResources:
+                            type: boolean
                         required:
                         - image
                         - name
@@ -1318,6 +1320,8 @@ spec:
                       type: object
                     useProfileProbes:
                       type: boolean
+                    useProfileResources:
+                      type: boolean
                   required:
                   - image
                   - name
@@ -1332,6 +1336,9 @@ spec:
                 - name
                 x-kubernetes-list-type: map
               useProfileProbes:
+                default: false
+                type: boolean
+              useProfileResources:
                 default: false
                 type: boolean
             required:

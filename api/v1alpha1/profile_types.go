@@ -103,6 +103,9 @@ type ProfileSpec struct {
 	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
 	// +optional
 	LivenessProbe *corev1.Probe `json:"livenessProbe,omitempty"`
+
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // ProfileStatus defines the observed state of Profile.
