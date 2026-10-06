@@ -84,6 +84,8 @@ type VesselWorkload struct {
 	UseProfileProbes *bool `json:"useProfileProbes,omitempty"`
 	// +optional
 	UseProfileResources *bool `json:"useProfileResources,omitempty"`
+	// +kubebuilder:default=false
+	UseProfileMetrics bool `json:"useProfileMetrics"`
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +optional
@@ -102,6 +104,8 @@ type VesselWorkload struct {
 	// +listType=map
 	// +listMapKey=name
 	Databases []Database `json:"databases,omitempty"`
+	// +optional
+	Metrics *Metrics `json:"metrics,omitempty"`
 }
 
 // VesselServer encapsulates everything

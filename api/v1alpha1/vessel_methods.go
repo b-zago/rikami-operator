@@ -129,6 +129,11 @@ func (v *Vessel) GetOwnedGVKList() []schema.GroupVersionKind {
 				Version: "v1",
 				Kind:    "JobList",
 			},
+			{
+				Group:   "monitoring.coreos.com",
+				Version: "v1",
+				Kind:    "ServiceMonitorList",
+			},
 		}
 	}
 	return list

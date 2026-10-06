@@ -10,7 +10,9 @@ import (
 	atlasv1 "github.com/ariga/atlas-operator/api/v1alpha1"
 	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -61,6 +63,7 @@ type VesselServerResource struct {
 	Server          *rikamiv1.VesselWorkload
 	Deployment      *appsv1ac.DeploymentApplyConfiguration
 	Service         *corev1ac.ServiceApplyConfiguration
+	ServiceMonitor  *unstructured.Unstructured
 	HTTPRoute       *gwv1ac.HTTPRouteApplyConfiguration
 	ExternalSecrets []*unstructured.Unstructured
 	Databases       []*Database
@@ -156,20 +159,37 @@ func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
 	}
 
 	r.Service = corev1ac.Service(r.Server.Name, r.Vessel.Namespace).
-		WithOwnerReferences(metav1ac.OwnerReference().
-			WithAPIVersion(rikamiv1.GroupVersion.String()).
-			WithKind("Vessel").
-			WithName(r.Vessel.Name).
-			WithUID(r.Vessel.UID).
-			WithController(true).
-			WithBlockOwnerDeletion(true)).
+		WithOwnerReferences( /* ... */ ).
 		WithLabels(labels).
 		WithSpec(corev1ac.ServiceSpec().
 			WithSelector(labels).
 			WithType(corev1.ServiceTypeClusterIP).
 			WithPorts(corev1ac.ServicePort().
+				WithName("entry"). // required once the Service has more than one port
 				WithPort(svcPort).
-				WithTargetPort(intstr.IntOrString{Type: intstr.Int, IntVal: r.Server.Port})))
+				WithTargetPort(intstr.FromString("entry"))))
+
+	if r.Server.UseProfileMetrics {
+		if m := r.Profile.Spec.Metrics; m != nil {
+			r.Service.Spec.WithPorts(corev1ac.ServicePort().
+				WithName("metrics").
+				WithPort(m.Port).
+				WithTargetPort(intstr.FromString("metrics")))
+
+			monitorSpec := r.buildServiceMonitorSpec(r.Profile.Spec.Metrics.Endpoint, r.Profile.Spec.Metrics.Interval, labels)
+			r.ServiceMonitor = r.newObject("monitoring.coreos.com/v1", "ServiceMonitor", r.Server.Name, monitorSpec)
+		}
+	} else {
+		if m := r.Server.Metrics; m != nil {
+			r.Service.Spec.WithPorts(corev1ac.ServicePort().
+				WithName("metrics").
+				WithPort(m.Port).
+				WithTargetPort(intstr.FromString("metrics")))
+
+			monitorSpec := r.buildServiceMonitorSpec(r.Server.Metrics.Endpoint, r.Server.Metrics.Interval, labels)
+			r.ServiceMonitor = r.newObject("monitoring.coreos.com/v1", "ServiceMonitor", r.Server.Name, monitorSpec)
+		}
+	}
 
 	if !isService {
 		var hostname string
@@ -372,7 +392,18 @@ func (r *VesselServerResource) buildContainer(appDBSecretSuffix string) *corev1a
 		WithImage(r.Server.Image).
 		WithImagePullPolicy(r.Profile.Spec.PullPolicy).
 		WithPorts(corev1ac.ContainerPort().
-			WithContainerPort(r.Server.Port))
+			WithContainerPort(r.Server.Port).
+			WithName("entry"))
+
+	if r.Server.UseProfileMetrics {
+		if r.Profile.Spec.Metrics != nil {
+			container.WithPorts(corev1ac.ContainerPort().WithName("metrics").WithContainerPort(r.Profile.Spec.Metrics.Port))
+		}
+	} else {
+		if r.Server.Metrics != nil {
+			container.WithPorts(corev1ac.ContainerPort().WithName("metrics").WithContainerPort(r.Server.Metrics.Port))
+		}
+	}
 
 	for _, secret := range r.Server.ExternalSecrets {
 		container.WithEnvFrom(corev1ac.EnvFromSource().WithSecretRef(corev1ac.SecretEnvSource().WithName(secret.Name)))
@@ -419,6 +450,23 @@ func (r *VesselServerResource) buildContainer(appDBSecretSuffix string) *corev1a
 	}
 
 	return container
+}
+
+func (r *VesselResourceSource) buildServiceMonitorSpec(endpoint, interval string, labels map[string]string) map[string]any {
+	spec := map[string]any{
+		"selector": metav1.LabelSelector{
+			MatchLabels: labels,
+		},
+		"namespaceSelector": monitoringv1.NamespaceSelector{
+			MatchNames: []string{r.Vessel.Namespace},
+		},
+		"endpoints": []monitoringv1.Endpoint{{
+			Port:     "metrics",
+			Path:     endpoint,
+			Interval: monitoringv1.Duration(interval),
+		}},
+	}
+	return spec
 }
 
 // toApplyConfig converts a core API type into its apply configuration

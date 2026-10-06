@@ -41,6 +41,7 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	atlasv1 "github.com/ariga/atlas-operator/api/v1alpha1"
 	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
@@ -290,6 +291,7 @@ func (r *VesselReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&esv1.ExternalSecret{}).
 		Owns(&atlasv1.AtlasSchema{}).
 		Owns(&batchv1.Job{}).
+		Owns(&monitoringv1.ServiceMonitor{}).
 		Complete(r)
 }
 
@@ -379,6 +381,16 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 		applied.add(*server.HTTPRoute.APIVersion, *server.HTTPRoute.Kind, *server.HTTPRoute.Name)
 
 	}
+
+	if server.ServiceMonitor != nil {
+		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(server.ServiceMonitor), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
+		if err != nil {
+			return err
+		}
+
+		applied.add(server.ServiceMonitor.GetAPIVersion(), server.ServiceMonitor.GetKind(), server.ServiceMonitor.GetName())
+	}
+
 	return nil
 }
 

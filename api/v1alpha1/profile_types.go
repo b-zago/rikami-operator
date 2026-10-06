@@ -38,6 +38,18 @@ type ExternalSecretsConfig struct {
 	SecretStoreRef *esv1.SecretStoreRef `json:"secretStoreRef,omitempty"`
 }
 
+type Metrics struct {
+	// +required
+	Endpoint string `json:"endpoint"`
+	// +required
+	Port int32 `json:"port"`
+	// Supported units: y, w, d, h, m, s, ms
+	// Examples: `30s`, `1m`, `1h20m15s`, `15d`
+	// +required
+	// +kubebuilder:validation:Pattern:="^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+	Interval string `json:"interval"`
+}
+
 // DatabaseAppConfig configures creation of externalsecret that would be injected as env into pods for app access to db
 type DatabaseAppConfig struct {
 	// +required
@@ -97,6 +109,8 @@ type ProfileSpec struct {
 	// +kubebuilder:default=80
 	DefaultServicePort int32 `json:"defaultServicePort"`
 
+	// +optional
+	Metrics *Metrics `json:"metrics,omitempty"`
 	// +optional
 	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
 	// +optional
