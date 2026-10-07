@@ -455,7 +455,7 @@ func (r *VesselServerResource) buildHTTPRoute(labels map[string]string) *gwv1ac.
 						WithValue("/"))).
 				WithBackendRefs(gwv1ac.HTTPBackendRef().
 					WithName(gwv1.ObjectName(r.Server.Name)).
-					WithPort(gwv1.PortNumber(r.servicePort(false))))))
+					WithPort(r.servicePort(false)))))
 }
 
 // ---------------------------------------------------------------------------
