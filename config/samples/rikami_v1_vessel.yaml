@@ -1,74 +1,64 @@
+# An application. Uses the Profile named "default" in the same namespace.
 apiVersion: rikami.zagoapps.com/v1alpha1
 kind: Vessel
 metadata:
-  name: simple-api
-  namespace: dev
+  name: shop
 spec:
-  # TODO(user): Add fields here
+  profile: default
+
+  # Vessel-wide defaults: take these settings from the Profile unless a
+  # workload says otherwise.
+  useProfileProbes: true
+  useProfileResources: true
+  useProfileScheduling: true
+  useProfileAutoscaling: true
+
   servers:
-    - image: ghcr.io/b-zago/simple-test-api/webserver:1.0.8
+    # Public server: Deployment, Service, HPA and an HTTPRoute at
+    # shop.apps.example.com.
+    - name: shop-api
+      image: ghcr.io/b-zago/simple-test-api/webserver:1.0.8
       port: 8000
-      name: simple-api
-      services:
-        - name: simple-api
-          port: 80
-          image: nginx:alpine-slim
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 256Mi
-          startupProbe:
-            httpGet:
-              path: /
-              port: 80
-            periodSeconds: 5
-            failureThreshold: 30
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 80
-            periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 3
-          livenessProbe:
-            tcpSocket:
-              port: 80
-            initialDelaySeconds: 5
-            periodSeconds: 20
-            failureThreshold: 3
+      useProfileMetrics: true
+
+      envs:
+        LOG_LEVEL: info
+
+      # Creates the ExternalSecret/Secret "shop-api-keys" and loads it as env vars.
       externalSecrets:
-        - name: simple-api
+        - name: shop-api-keys
           data:
-            - secretKey: SECRET1
-              key: /clusters/dev/simple-api
-              property: SECRET1
-            - secretKey: SECRET2
-              key: /clusters/dev/simple-api
-              property: SECRET2
-            - secretKey: ENV1
-              key: /clusters/dev/simple-api
-              property: SECRET2
-            - secretKey: ENV2
-              key: /clusters/dev/simple-api
-              property: SECRET2
+            - secretKey: PAYMENT_API_KEY
+              key: /apps/example/shop
+              property: payment_api_key
+
+      # Creates credentials (db_host, db_username, db_password), an Atlas
+      # schema migration and a one-off seed Job.
       databases:
-        - name: simple-api
+        - name: shop
           schema: |
-            CREATE TABLE IF NOT EXISTS scores (
+            CREATE TABLE IF NOT EXISTS orders (
               id SERIAL PRIMARY KEY,
-              player VARCHAR(50),
-              score INTEGER,
+              customer VARCHAR(100) NOT NULL,
+              total_cents INTEGER NOT NULL,
               created_at TIMESTAMP DEFAULT NOW()
-            )
+            );
           seed: |
-            INSERT INTO scores (player, score) VALUES
-              ('alice', 1200),
-              ('bob', 950),
-              ('charlie', 1480),
-              ('diana', 870),
-              ('eve', 1320),
-              ('alice', 1510),
-              ('bob', 1100);
+            INSERT INTO orders (customer, total_cents) VALUES
+              ('alice', 4200),
+              ('bob', 1999);
+
+      # In-cluster workload next to the server: Deployment and Service,
+      # no HTTPRoute. Its name must differ from the server's.
+      services:
+        - name: shop-cache
+          image: nginx:alpine-slim
+          port: 80
+          # Overrides for this workload only: nginx has no /ready or
+          # /healthz, and a cache doesn't need to autoscale.
+          useProfileProbes: false
+          useProfileAutoscaling: false
+          readinessProbe:
+            tcpSocket:
+              port: entry
+            periodSeconds: 10

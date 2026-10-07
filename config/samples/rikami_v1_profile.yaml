@@ -1,25 +1,96 @@
+# Environment-wide defaults. Every Vessel in this namespace uses the Profile
+# named "default" unless it sets spec.profile.
 apiVersion: rikami.zagoapps.com/v1alpha1
 kind: Profile
 metadata:
   name: default
-  namespace: dev
 spec:
-  # TODO(user): Add fields here
-  gateway: dev-gateway
-  pullPolicy: Always
-  domain: pve.zagoapps.com
+  # Routing: servers get <vessel>.<domain> on this Gateway.
+  gateway: main-gateway
+  domain: apps.example.com
+  namespacedSubdomain: false
+  defaultServicePort: 80
+
+  pullPolicy: IfNotPresent
+  # pullSecret: ghcr-creds
+
+  # Defaults for every ExternalSecret the operator creates.
   externalSecretsConfig:
-    refreshPolicy: CreatedOnce
-    refreshInterval: 0s
+    refreshPolicy: Periodic
+    refreshInterval: 1h
     secretStoreRef:
       name: aws-ssm
       kind: ClusterSecretStore
+
+  # Where database credentials live in the secret store. "*" is replaced
+  # by the database name from the Vessel.
   databaseConfig:
+    envKeysPrefix: db_
     appConfig:
+      secretAppPath: /pgsql/example/*/app
       hostKey: host
-      passwordKey: password
       usernameKey: username
-      secretAppPath: /clusters/pgsql/dev/*/app
+      passwordKey: password
     migratorConfig:
-      secretMigratorPath: /clusters/pgsql/dev/*/migrator
+      secretMigratorPath: /pgsql/example/*/migrator
       secretKey: url
+
+  # Used by workloads with useProfileResources.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Used by workloads with useProfileProbes. "entry" is the operator's
+  # name for the workload's main port.
+  startupProbe:
+    httpGet:
+      path: /ready
+      port: entry
+    periodSeconds: 5
+    failureThreshold: 30
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: entry
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: entry
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+  # Used by workloads with useProfileScheduling: stay off control-plane
+  # nodes and spread replicas across nodes. No labelSelector needed, the
+  # operator fills in each workload's own labels.
+  scheduling:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+
+  # Used by workloads with useProfileAutoscaling. Needs resource requests.
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilization: 75
+
+  # Used by workloads with useProfileMetrics.
+  metrics:
+    endpoint: /metrics
+    port: 9000
+    interval: 30s
