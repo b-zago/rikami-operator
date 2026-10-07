@@ -81,11 +81,15 @@ type VesselWorkload struct {
 	Port int32 `json:"port"`
 
 	// +optional
+	UseProfileScheduling *bool `json:"useProfileScheduling,omitempty"`
+	// +optional
 	UseProfileProbes *bool `json:"useProfileProbes,omitempty"`
 	// +optional
 	UseProfileResources *bool `json:"useProfileResources,omitempty"`
 	// +kubebuilder:default=false
 	UseProfileMetrics bool `json:"useProfileMetrics"`
+	// +optional
+	UseProfileAutoscaling *bool `json:"useProfileAutoscaling,omitempty"`
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +optional
@@ -106,6 +110,10 @@ type VesselWorkload struct {
 	Databases []Database `json:"databases,omitempty"`
 	// +optional
 	Metrics *Metrics `json:"metrics,omitempty"`
+	// +optional
+	Scheduling *Scheduling `json:"scheduling,omitempty"`
+	// +optional
+	Autoscaling *Autoscaling `json:"autoscaling,omitempty"`
 }
 
 // VesselServer encapsulates everything
@@ -145,9 +153,13 @@ type VesselSpec struct {
 	Servers []*VesselServer `json:"servers,omitempty"`
 
 	// +kubebuilder:default=false
-	UseProfileProbes bool `json:"useProfileProbes"`
+	UseProfileProbes bool `json:"useProfileProbes,omitempty"`
 	// +kubebuilder:default=false
 	UseProfileResources bool `json:"useProfileResources,omitempty"`
+	// +kubebuilder:default=false
+	UseProfileScheduling bool `json:"useProfileScheduling,omitempty"`
+	// +kubebuilder:default=false
+	UseProfileAutoscaling bool `json:"useProfileAutoscaling,omitempty"`
 }
 
 // VesselStatus defines the observed state of Vessel.

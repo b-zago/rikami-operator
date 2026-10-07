@@ -23,7 +23,10 @@ import (
 	"strings"
 	"time"
 
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,14 +37,13 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cli-utils/pkg/kstatus/status"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
-
-	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	atlasv1 "github.com/ariga/atlas-operator/api/v1alpha1"
 	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
@@ -72,6 +74,7 @@ type VesselReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -293,6 +296,8 @@ func (r *VesselReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&atlasv1.AtlasSchema{}).
 		Owns(&batchv1.Job{}).
 		Owns(&monitoringv1.ServiceMonitor{}).
+		Owns(&autoscalingv2.HorizontalPodAutoscaler{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
@@ -362,6 +367,13 @@ func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServer
 	err := r.Apply(ctx, server.Deployment, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
 	if err != nil {
 		return err
+	}
+
+	if server.HPA != nil {
+		if err := r.Apply(ctx, server.HPA, client.FieldOwner(FieldOwnerName), client.ForceOwnership); err != nil {
+			return err
+		}
+		applied.add(*server.HPA.APIVersion, *server.HPA.Kind, *server.HPA.Name)
 	}
 
 	applied.add(*server.Deployment.APIVersion, *server.Deployment.Kind, *server.Deployment.Name)

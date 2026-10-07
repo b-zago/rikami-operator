@@ -11,12 +11,14 @@ import (
 	rikamiv1 "github.com/b-zago/rikami-operator/api/v1alpha1"
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	appsv1ac "k8s.io/client-go/applyconfigurations/apps/v1"
+	autoscalingv2ac "k8s.io/client-go/applyconfigurations/autoscaling/v2"
 	batchv1ac "k8s.io/client-go/applyconfigurations/batch/v1"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -63,6 +65,7 @@ type VesselServerResource struct {
 	Server          *rikamiv1.VesselWorkload
 	Deployment      *appsv1ac.DeploymentApplyConfiguration
 	Service         *corev1ac.ServiceApplyConfiguration
+	HPA             *autoscalingv2ac.HorizontalPodAutoscalerApplyConfiguration
 	ServiceMonitor  *unstructured.Unstructured
 	HTTPRoute       *gwv1ac.HTTPRouteApplyConfiguration
 	ExternalSecrets []*unstructured.Unstructured
@@ -122,6 +125,16 @@ func (r *VesselServerResource) newObject(apiVersion, kind, name string, spec map
 	}}
 }
 
+func (r *VesselServerResource) ownerRef() *metav1ac.OwnerReferenceApplyConfiguration {
+	return metav1ac.OwnerReference().
+		WithAPIVersion(rikamiv1.GroupVersion.String()).
+		WithKind("Vessel").
+		WithName(r.Vessel.Name).
+		WithUID(r.Vessel.UID).
+		WithController(true).
+		WithBlockOwnerDeletion(true)
+}
+
 func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
 	appDBSecretSuffix := "-app"
 	migratorDBSecretSuffix := "-migrator"
@@ -148,6 +161,49 @@ func (r *VesselServerResource) Build(isService bool) *VesselServerResource {
 
 	if r.Profile.Spec.PullSecret != nil {
 		r.Deployment.Spec.Template.Spec.WithImagePullSecrets(corev1ac.LocalObjectReference().WithName(*r.Profile.Spec.PullSecret))
+	}
+
+	if s := r.resolveScheduling(); s != nil {
+		podSpec := r.Deployment.Spec.Template.Spec
+		if len(s.NodeSelector) > 0 {
+			podSpec.WithNodeSelector(s.NodeSelector)
+		}
+		if s.Affinity != nil {
+			podSpec.WithAffinity(toApplyConfig[corev1ac.AffinityApplyConfiguration](s.Affinity))
+		}
+		for i := range s.Tolerations {
+			podSpec.WithTolerations(toApplyConfig[corev1ac.TolerationApplyConfiguration](&s.Tolerations[i]))
+		}
+		for i := range s.TopologySpreadConstraints {
+			tsc := toApplyConfig[corev1ac.TopologySpreadConstraintApplyConfiguration](&s.TopologySpreadConstraints[i])
+			if tsc.LabelSelector == nil {
+				tsc.WithLabelSelector(metav1ac.LabelSelector().WithMatchLabels(labels))
+			}
+			podSpec.WithTopologySpreadConstraints(tsc)
+		}
+	}
+
+	if a := r.resolveAutoscaling(); a != nil {
+		spec := autoscalingv2ac.HorizontalPodAutoscalerSpec().
+			WithScaleTargetRef(autoscalingv2ac.CrossVersionObjectReference().
+				WithAPIVersion("apps/v1").
+				WithKind("Deployment").
+				WithName(r.Server.Name)).
+			WithMaxReplicas(a.MaxReplicas)
+		if a.MinReplicas != nil {
+			spec.WithMinReplicas(*a.MinReplicas)
+		}
+		if a.TargetCPUUtilization != nil {
+			spec.WithMetrics(resourceMetric(corev1.ResourceCPU, *a.TargetCPUUtilization))
+		}
+		if a.TargetMemoryUtilization != nil {
+			spec.WithMetrics(resourceMetric(corev1.ResourceMemory, *a.TargetMemoryUtilization))
+		}
+
+		r.HPA = autoscalingv2ac.HorizontalPodAutoscaler(r.Server.Name, r.Vessel.Namespace).
+			WithOwnerReferences(r.ownerRef()).
+			WithLabels(labels).
+			WithSpec(spec)
 	}
 
 	var svcPort int32
@@ -467,6 +523,38 @@ func (r *VesselResourceSource) buildServiceMonitorSpec(endpoint, interval string
 		}},
 	}
 	return spec
+}
+
+func (r *VesselServerResource) resolveScheduling() *rikamiv1.Scheduling {
+	use := r.Vessel.Spec.UseProfileScheduling
+	if r.Server.UseProfileScheduling != nil {
+		use = *r.Server.UseProfileScheduling
+	}
+	if use {
+		return cmp.Or(r.Server.Scheduling, r.Profile.Spec.Scheduling)
+	}
+	return r.Server.Scheduling
+}
+
+func resourceMetric(name corev1.ResourceName, target int32) *autoscalingv2ac.MetricSpecApplyConfiguration {
+	return autoscalingv2ac.MetricSpec().
+		WithType(autoscalingv2.ResourceMetricSourceType).
+		WithResource(autoscalingv2ac.ResourceMetricSource().
+			WithName(name).
+			WithTarget(autoscalingv2ac.MetricTarget().
+				WithType(autoscalingv2.UtilizationMetricType).
+				WithAverageUtilization(target)))
+}
+
+func (r *VesselServerResource) resolveAutoscaling() *rikamiv1.Autoscaling {
+	use := r.Vessel.Spec.UseProfileAutoscaling
+	if r.Server.UseProfileAutoscaling != nil {
+		use = *r.Server.UseProfileAutoscaling
+	}
+	if use {
+		return cmp.Or(r.Server.Autoscaling, r.Profile.Spec.Autoscaling)
+	}
+	return r.Server.Autoscaling
 }
 
 // toApplyConfig converts a core API type into its apply configuration

@@ -134,6 +134,11 @@ func (v *Vessel) GetOwnedGVKList() []schema.GroupVersionKind {
 				Version: "v1",
 				Kind:    "ServiceMonitorList",
 			},
+			{
+				Group:   "autoscaling",
+				Version: "v2",
+				Kind:    "HorizontalPodAutoscalerList",
+			},
 		}
 	}
 	return list

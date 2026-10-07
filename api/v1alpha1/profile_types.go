@@ -80,6 +80,36 @@ type DatabaseConfig struct {
 	EnvKeysPrefix string `json:"envKeysPrefix"`
 }
 
+type Scheduling struct {
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+}
+
+// Autoscaling applies HPA
+// +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || self.minReplicas <= self.maxReplicas",message="minReplicas must be <= maxReplicas"
+type Autoscaling struct {
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+	// +required
+	// +kubebuilder:validation:Minimum=1
+	MaxReplicas int32 `json:"maxReplicas"`
+	// Percent of the container's CPU request.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	TargetCPUUtilization *int32 `json:"targetCPUUtilization,omitempty"`
+	// Percent of the container's memory request.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	TargetMemoryUtilization *int32 `json:"targetMemoryUtilization,omitempty"`
+}
+
 // ProfileSpec defines the desired state of Profile
 type ProfileSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
@@ -120,6 +150,12 @@ type ProfileSpec struct {
 
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// +optional
+	Scheduling *Scheduling `json:"scheduling,omitempty"`
+
+	// +optional
+	Autoscaling *Autoscaling `json:"autoscaling,omitempty"`
 }
 
 // ProfileStatus defines the observed state of Profile.
