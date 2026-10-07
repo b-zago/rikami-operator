@@ -76,15 +76,9 @@ type VesselReconciler struct {
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Vessel object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
+// Reconcile builds every child resource for the Vessel from its Profile,
+// server-side applies them, prunes anything no longer in the spec, and then
+// sets the Vessel's conditions from the health of its children.
 func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	applied := appliedSet{}
@@ -130,7 +124,7 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	// SSA apply logic
+	// Apply
 	var (
 		applyErrs   []error
 		failedNames []string
@@ -138,7 +132,7 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	for _, server := range vessel.Spec.Servers {
 		srv := NewServer(vessel, profile, server)
-		if err := r.applyServer(ctx, srv, false, applied); err != nil {
+		if err := r.applyServer(ctx, srv, applied); err != nil {
 			log.Error(err, "failed to apply server", "server", server.Name)
 			applyErrs = append(applyErrs, fmt.Errorf("server %s: %w", server.Name, err))
 			failedNames = append(failedNames, server.Name)
@@ -157,9 +151,8 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 		return ctrl.Result{}, err
 	}
-	// end SSA
-	// encapsulate into a func later too
 
+	// Prune
 	if err := r.prune(ctx, vessel, applied); err != nil {
 		log.Error(err, "failed to prune orphaned resources")
 		original = vessel.DeepCopy()
@@ -173,54 +166,21 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	vLabel := map[string]string{vesselLabel: vessel.Name}
-
-	// check status of all children here to set the current status to work on
-	// by determining what kinds to look for first
-	gvks := vessel.GetOwnedGVKList()
-	resourceCount := 0
-	okCount := 0
-	progressing := false
-
-	for _, gvk := range gvks {
-		list := &unstructured.UnstructuredList{}
-		list.SetGroupVersionKind(gvk)
-		err := r.List(ctx, list, client.InNamespace(vessel.Namespace), client.MatchingLabels(vLabel))
-		if err != nil {
-			log.Error(err, "could not list owned resources")
-			return ctrl.Result{}, err
-		}
-
-		resourceCount += len(list.Items)
-
-		for _, item := range list.Items {
-			// some kind of guard here to check if we should use custom status check or go with kstatus behaviour
-			// for now lets just use kstatus
-			result, err := status.Compute(&item)
-			if err != nil {
-				log.Error(err, "could not compute resource status")
-				return ctrl.Result{}, reconcile.TerminalError(err)
-			}
-			// below in each case also collect the info about the resources so that we can communicate clearly what is at what state currently (or at least as much as we can communicate it)
-			// for this we can check for every kstatus Status value for every resource and act accordingly
-			switch result.Status.String() {
-			case "Current":
-				okCount++
-			case "InProgress":
-				progressing = true
-			}
-		}
+	// Health
+	health, err := r.childrenHealth(ctx, vessel)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
-	// this needs more work for different cases/scenarios
-	// like for example when some resources are progressing but some are failed we can set progressing and degraded conditions to true (instead of blindly doing unknown maybe)
-	// something to think about
+	// Status
+	// TODO: when some children are progressing and others failed, set both
+	// Progressing and Degraded instead of picking one.
 	original = vessel.DeepCopy()
 	requeueReconcile := false
-	if okCount != resourceCount && progressing {
+	if health.current != health.total && health.progressing {
 		vessel.SetStatusFullyProgressing(ctx, &rikamiv1.VesselNewStatusInfo{Reason: rikamiv1.ReasonResourcesInProgress, Message: "some resources are in progress"})
 		requeueReconcile = true
-	} else if okCount != resourceCount {
+	} else if health.current != health.total {
 		vessel.SetStatusFullyDegraded(ctx, &rikamiv1.VesselNewStatusInfo{Reason: rikamiv1.ReasonResourcesUnhealthy, Message: "some resources seem unhealthy"})
 		requeueReconcile = true
 	}
@@ -233,8 +193,6 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if requeueReconcile {
 		return ctrl.Result{RequeueAfter: time.Second * 10}, nil
 	}
-	// end checking children status
-	// encapsulate into a func later
 
 	original = vessel.DeepCopy()
 	vessel.SetStatusFullyAvailable(ctx, &rikamiv1.VesselNewStatusInfo{Reason: rikamiv1.ReasonSucceeded, Message: "reconcile succeeded and everything looks healthy"})
@@ -301,6 +259,41 @@ func (r *VesselReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// childHealth summarises the kstatus of every child resource.
+type childHealth struct {
+	total       int
+	current     int
+	progressing bool
+}
+
+// childrenHealth lists every resource kind the Vessel owns and computes each
+// one's status with kstatus.
+func (r *VesselReconciler) childrenHealth(ctx context.Context, v *rikamiv1.Vessel) (childHealth, error) {
+	var h childHealth
+	for _, gvk := range v.GetOwnedGVKList() {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk)
+		if err := r.List(ctx, list, client.InNamespace(v.Namespace), client.MatchingLabels{vesselLabel: v.Name}); err != nil {
+			return h, fmt.Errorf("listing %s: %w", gvk.Kind, err)
+		}
+
+		h.total += len(list.Items)
+		for i := range list.Items {
+			result, err := status.Compute(&list.Items[i])
+			if err != nil {
+				return h, reconcile.TerminalError(fmt.Errorf("computing status of %s %s: %w", gvk.Kind, list.Items[i].GetName(), err))
+			}
+			switch result.Status {
+			case status.CurrentStatus:
+				h.current++
+			case status.InProgressStatus:
+				h.progressing = true
+			}
+		}
+	}
+	return h, nil
+}
+
 func (r *VesselReconciler) updateStatus(ctx context.Context, v *rikamiv1.Vessel, original *rikamiv1.Vessel) error {
 	patch := client.MergeFrom(original)
 	if err := r.Status().Patch(ctx, v, patch); err != nil {
@@ -310,100 +303,83 @@ func (r *VesselReconciler) updateStatus(ctx context.Context, v *rikamiv1.Vessel,
 	return nil
 }
 
-// respect order of the resources applied (wait for them to be healthy) later - for now it sorts itself out over time
-func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource, isService bool, applied appliedSet) error {
+// applyServer applies every resource built for a server, then recurses into
+// its in-cluster services. Ordering is best effort for now: dependencies
+// (secrets, schemas) go first, and anything not ready yet settles over the
+// following reconciles.
+func (r *VesselReconciler) applyServer(ctx context.Context, server *VesselServerResource, applied appliedSet) error {
 	for _, secret := range server.ExternalSecrets {
-
-		err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(secret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-		if err != nil {
+		if err := r.applyUnstructured(ctx, secret, applied); err != nil {
 			return err
 		}
-		applied.add(secret.GetAPIVersion(), secret.GetKind(), secret.GetName())
 	}
 
 	for _, db := range server.Databases {
-
-		err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.MigratorSecret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-		if err != nil {
-			return err
-		}
-
-		applied.add(db.MigratorSecret.GetAPIVersion(), db.MigratorSecret.GetKind(), db.MigratorSecret.GetName())
-
-		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.AppSecret), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-		if err != nil {
-			return err
-		}
-
-		applied.add(db.AppSecret.GetAPIVersion(), db.AppSecret.GetKind(), db.AppSecret.GetName())
-
-		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(db.AtlasSchema), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-		if err != nil {
-			return err
-		}
-
-		applied.add(db.AtlasSchema.GetAPIVersion(), db.AtlasSchema.GetKind(), db.AtlasSchema.GetName())
-
-		// optional
-		if db.SeedJob != nil {
-			err = r.Apply(ctx, db.SeedJob, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-			if err != nil {
+		for _, obj := range []*unstructured.Unstructured{db.MigratorSecret, db.AppSecret, db.AtlasSchema} {
+			if err := r.applyUnstructured(ctx, obj, applied); err != nil {
 				return err
 			}
-
-			applied.add(*db.SeedJob.APIVersion, *db.SeedJob.Kind, *db.SeedJob.Name)
 		}
-
+		if job := db.SeedJob; job != nil {
+			if err := r.applyTyped(ctx, job, job.APIVersion, job.Kind, job.Name, applied); err != nil {
+				return err
+			}
+		}
 	}
 
 	for _, service := range server.Services {
-		newService := NewService(server.Vessel, server.Profile, &service)
-		err := r.applyServer(ctx, newService, true, applied)
-		if err != nil {
+		if err := r.applyServer(ctx, NewService(server.Vessel, server.Profile, &service), applied); err != nil {
 			return err
 		}
 	}
 
-	err := r.Apply(ctx, server.Deployment, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-	if err != nil {
+	d := server.Deployment
+	if err := r.applyTyped(ctx, d, d.APIVersion, d.Kind, d.Name, applied); err != nil {
 		return err
 	}
 
-	if server.HPA != nil {
-		if err := r.Apply(ctx, server.HPA, client.FieldOwner(FieldOwnerName), client.ForceOwnership); err != nil {
+	if hpa := server.HPA; hpa != nil {
+		if err := r.applyTyped(ctx, hpa, hpa.APIVersion, hpa.Kind, hpa.Name, applied); err != nil {
 			return err
 		}
-		applied.add(*server.HPA.APIVersion, *server.HPA.Kind, *server.HPA.Name)
 	}
 
-	applied.add(*server.Deployment.APIVersion, *server.Deployment.Kind, *server.Deployment.Name)
-
-	err = r.Apply(ctx, server.Service, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-	if err != nil {
+	svc := server.Service
+	if err := r.applyTyped(ctx, svc, svc.APIVersion, svc.Kind, svc.Name, applied); err != nil {
 		return err
 	}
 
-	applied.add(*server.Service.APIVersion, *server.Service.Kind, *server.Service.Name)
-
-	if !isService {
-		err = r.Apply(ctx, server.HTTPRoute, client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-		if err != nil {
+	if route := server.HTTPRoute; route != nil {
+		if err := r.applyTyped(ctx, route, route.APIVersion, route.Kind, route.Name, applied); err != nil {
 			return err
 		}
-
-		applied.add(*server.HTTPRoute.APIVersion, *server.HTTPRoute.Kind, *server.HTTPRoute.Name)
-
 	}
 
 	if server.ServiceMonitor != nil {
-		err = r.Apply(ctx, client.ApplyConfigurationFromUnstructured(server.ServiceMonitor), client.FieldOwner(FieldOwnerName), client.ForceOwnership)
-		if err != nil {
+		if err := r.applyUnstructured(ctx, server.ServiceMonitor, applied); err != nil {
 			return err
 		}
-
-		applied.add(server.ServiceMonitor.GetAPIVersion(), server.ServiceMonitor.GetKind(), server.ServiceMonitor.GetName())
 	}
 
+	return nil
+}
+
+// applyTyped server-side applies a typed apply configuration and records it
+// in the applied set so it survives pruning.
+func (r *VesselReconciler) applyTyped(ctx context.Context, obj runtime.ApplyConfiguration, apiVersion, kind, name *string, applied appliedSet) error {
+	if err := r.Apply(ctx, obj, client.FieldOwner(FieldOwnerName), client.ForceOwnership); err != nil {
+		return fmt.Errorf("applying %s %s: %w", *kind, *name, err)
+	}
+	applied.add(*apiVersion, *kind, *name)
+	return nil
+}
+
+// applyUnstructured does the same for third-party CRDs built as unstructured.
+func (r *VesselReconciler) applyUnstructured(ctx context.Context, obj *unstructured.Unstructured, applied appliedSet) error {
+	if err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj), client.FieldOwner(FieldOwnerName), client.ForceOwnership); err != nil {
+		return fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err)
+	}
+	applied.add(obj.GetAPIVersion(), obj.GetKind(), obj.GetName())
 	return nil
 }
 
