@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/utils/ptr"
-	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 // These tests exercise Build() only. It is a pure function of the Vessel and
@@ -25,6 +25,16 @@ import (
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+const (
+	testServerName     = "api"
+	testNodeLabel      = "pool"
+	testNodePool       = "apps"
+	profileStartupPath = "/profile-startup"
+	profileReadyPath   = "/profile-ready"
+	profileHealthzPath = "/profile-healthz"
+	customReadyPath    = "/custom-ready"
+)
 
 func testVessel(mutate ...func(*rikamiv1.Vessel)) *rikamiv1.Vessel {
 	v := &rikamiv1.Vessel{
@@ -62,9 +72,9 @@ func testProfile(mutate ...func(*rikamiv1.Profile)) *rikamiv1.Profile {
 				},
 				EnvKeysPrefix: "db_",
 			},
-			StartupProbe:   httpProbe("/profile-startup"),
-			ReadinessProbe: httpProbe("/profile-ready"),
-			LivenessProbe:  httpProbe("/profile-healthz"),
+			StartupProbe:   httpProbe(profileStartupPath),
+			ReadinessProbe: httpProbe(profileReadyPath),
+			LivenessProbe:  httpProbe(profileHealthzPath),
 			Resources: &corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
 			},
@@ -78,7 +88,7 @@ func testProfile(mutate ...func(*rikamiv1.Profile)) *rikamiv1.Profile {
 
 func testServer(mutate ...func(*rikamiv1.VesselServer)) *rikamiv1.VesselServer {
 	s := &rikamiv1.VesselServer{
-		VesselWorkload: rikamiv1.VesselWorkload{Name: "api", Image: "ghcr.io/example/api:1.0.0", Port: 3000},
+		VesselWorkload: rikamiv1.VesselWorkload{Name: testServerName, Image: "ghcr.io/example/api:1.0.0", Port: 3000},
 	}
 	for _, m := range mutate {
 		m(s)
@@ -121,13 +131,13 @@ func TestBuildProbes(t *testing.T) {
 		{
 			name:       "vessel flag on uses all three profile probes",
 			vesselFlag: true,
-			startup:    "/profile-startup", readiness: "/profile-ready", liveness: "/profile-healthz",
+			startup:    profileStartupPath, readiness: profileReadyPath, liveness: profileHealthzPath,
 		},
 		{
 			name:              "workload probe wins over profile",
 			vesselFlag:        true,
-			workloadReadiness: httpProbe("/custom-ready"),
-			startup:           "/profile-startup", readiness: "/custom-ready", liveness: "/profile-healthz",
+			workloadReadiness: httpProbe(customReadyPath),
+			startup:           profileStartupPath, readiness: customReadyPath, liveness: profileHealthzPath,
 		},
 		{
 			name:         "workload flag false overrides vessel flag",
@@ -137,12 +147,12 @@ func TestBuildProbes(t *testing.T) {
 		{
 			name:         "workload flag true overrides vessel default",
 			workloadFlag: ptr.To(true),
-			startup:      "/profile-startup", readiness: "/profile-ready", liveness: "/profile-healthz",
+			startup:      profileStartupPath, readiness: profileReadyPath, liveness: profileHealthzPath,
 		},
 		{
 			name:              "profile off uses only workload probes",
-			workloadReadiness: httpProbe("/custom-ready"),
-			readiness:         "/custom-ready",
+			workloadReadiness: httpProbe(customReadyPath),
+			readiness:         customReadyPath,
 		},
 	}
 
@@ -197,13 +207,13 @@ func TestBuildResources(t *testing.T) {
 func TestBuildScheduling(t *testing.T) {
 	profile := testProfile(func(p *rikamiv1.Profile) {
 		p.Spec.Scheduling = &rikamiv1.Scheduling{
-			NodeSelector: map[string]string{"pool": "apps"},
+			NodeSelector: map[string]string{testNodeLabel: testNodePool},
 			Tolerations:  []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpExists}},
 			TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
 				{MaxSkew: 1, TopologyKey: "kubernetes.io/hostname", WhenUnsatisfiable: corev1.ScheduleAnyway},
 				{
 					MaxSkew: 1, TopologyKey: "topology.kubernetes.io/zone", WhenUnsatisfiable: corev1.ScheduleAnyway,
-					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"custom": "selector"}},
+					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"custom": "spread"}},
 				},
 			},
 		}
@@ -211,7 +221,7 @@ func TestBuildScheduling(t *testing.T) {
 	v := testVessel(func(v *rikamiv1.Vessel) { v.Spec.UseProfileScheduling = true })
 	podSpec := NewServer(v, profile, testServer()).Deployment.Spec.Template.Spec
 
-	if podSpec.NodeSelector["pool"] != "apps" {
+	if podSpec.NodeSelector[testNodeLabel] != testNodePool {
 		t.Errorf("nodeSelector = %v, want pool=apps", podSpec.NodeSelector)
 	}
 	if len(podSpec.Tolerations) != 1 || *podSpec.Tolerations[0].Key != "dedicated" {
@@ -223,15 +233,15 @@ func TestBuildScheduling(t *testing.T) {
 
 	t.Run("missing labelSelector gets the server's labels", func(t *testing.T) {
 		got := podSpec.TopologySpreadConstraints[0].LabelSelector
-		want := map[string]string{vesselLabel: "shop", serverLabel: "api"}
-		if got == nil || !mapsEqual(got.MatchLabels, want) {
+		want := map[string]string{vesselLabel: "shop", serverLabel: testServerName}
+		if got == nil || !maps.Equal(got.MatchLabels, want) {
 			t.Errorf("labelSelector = %+v, want matchLabels %v", got, want)
 		}
 	})
 
 	t.Run("explicit labelSelector is left alone", func(t *testing.T) {
 		got := podSpec.TopologySpreadConstraints[1].LabelSelector
-		if got == nil || got.MatchLabels["custom"] != "selector" || len(got.MatchLabels) != 1 {
+		if got == nil || got.MatchLabels["custom"] != "spread" || len(got.MatchLabels) != 1 {
 			t.Errorf("labelSelector = %+v, want only custom=selector", got)
 		}
 	})
@@ -245,15 +255,15 @@ func TestBuildScheduling(t *testing.T) {
 
 func TestBuildSchedulingWorkloadOverride(t *testing.T) {
 	profile := testProfile(func(p *rikamiv1.Profile) {
-		p.Spec.Scheduling = &rikamiv1.Scheduling{NodeSelector: map[string]string{"pool": "profile"}}
+		p.Spec.Scheduling = &rikamiv1.Scheduling{NodeSelector: map[string]string{testNodeLabel: "profile"}}
 	})
 	v := testVessel(func(v *rikamiv1.Vessel) { v.Spec.UseProfileScheduling = true })
 	s := testServer(func(s *rikamiv1.VesselServer) {
-		s.Scheduling = &rikamiv1.Scheduling{NodeSelector: map[string]string{"pool": "workload"}}
+		s.Scheduling = &rikamiv1.Scheduling{NodeSelector: map[string]string{testNodeLabel: "workload"}}
 	})
 
 	podSpec := NewServer(v, profile, s).Deployment.Spec.Template.Spec
-	if podSpec.NodeSelector["pool"] != "workload" {
+	if podSpec.NodeSelector[testNodeLabel] != "workload" {
 		t.Errorf("nodeSelector = %v, want the workload's block to replace the profile's", podSpec.NodeSelector)
 	}
 }
@@ -288,7 +298,7 @@ func TestBuildAutoscaling(t *testing.T) {
 		if *spec.MinReplicas != 2 || *spec.MaxReplicas != 4 {
 			t.Errorf("replicas = %d..%d, want 2..4", *spec.MinReplicas, *spec.MaxReplicas)
 		}
-		if *spec.ScaleTargetRef.Name != "api" || *spec.ScaleTargetRef.Kind != "Deployment" {
+		if *spec.ScaleTargetRef.Name != testServerName || *spec.ScaleTargetRef.Kind != "Deployment" {
 			t.Errorf("scaleTargetRef = %+v, want Deployment api", spec.ScaleTargetRef)
 		}
 		if len(spec.Metrics) != 1 {
@@ -339,7 +349,7 @@ func TestBuildServer(t *testing.T) {
 			t.Fatal("expected an HTTPRoute for a server")
 		}
 		port := r.HTTPRoute.Spec.Rules[0].BackendRefs[0].Port
-		if port == nil || *port != gwv1.PortNumber(8080) {
+		if port == nil || *port != 8080 {
 			t.Errorf("backend port = %v, want 8080", port)
 		}
 	})
@@ -467,8 +477,9 @@ func TestBuildExternalSecrets(t *testing.T) {
 	})
 
 	t.Run("container loads both secrets", func(t *testing.T) {
-		var names []string
-		for _, e := range container(t, r).EnvFrom {
+		envFrom := container(t, r).EnvFrom
+		names := make([]string, 0, len(envFrom))
+		for _, e := range envFrom {
 			names = append(names, *e.SecretRef.Name)
 		}
 		if !slices.Contains(names, "keys") || !slices.Contains(names, "everything") {
@@ -533,8 +544,9 @@ func TestBuildDatabases(t *testing.T) {
 	})
 
 	t.Run("container loads the app secrets", func(t *testing.T) {
-		var names []string
-		for _, e := range container(t, r).EnvFrom {
+		envFrom := container(t, r).EnvFrom
+		names := make([]string, 0, len(envFrom))
+		for _, e := range envFrom {
 			names = append(names, *e.SecretRef.Name)
 		}
 		if !slices.Contains(names, "orders-app") || !slices.Contains(names, "users-app") {
@@ -549,31 +561,19 @@ func TestBuildDatabases(t *testing.T) {
 
 func TestAppliedSet(t *testing.T) {
 	s := appliedSet{}
-	s.add("apps/v1", "Deployment", "api")
-	s.add("v1", "Service", "api")
+	s.add("apps/v1", "Deployment", testServerName)
+	s.add("v1", "Service", testServerName)
 
 	deploy := schema.GroupKind{Group: "apps", Kind: "Deployment"}
 	svc := schema.GroupKind{Group: "", Kind: "Service"}
 
-	if !s.has(deploy, "api") || !s.has(svc, "api") {
+	if !s.has(deploy, testServerName) || !s.has(svc, testServerName) {
 		t.Error("expected both applied objects to be found")
 	}
 	if s.has(deploy, "other") {
 		t.Error("unexpected match on a different name")
 	}
-	if s.has(schema.GroupKind{Group: "batch", Kind: "Job"}, "api") {
+	if s.has(schema.GroupKind{Group: "batch", Kind: "Job"}, testServerName) {
 		t.Error("unexpected match on a different kind with the same name")
 	}
-}
-
-func mapsEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
 }
