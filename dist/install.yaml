@@ -2804,7 +2804,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: ghcr.io/b-zago/rikami-operator/controller:1.0.1
+        image: ghcr.io/b-zago/rikami-operator/controller:1.0.2
         livenessProbe:
           httpGet:
             path: /healthz
