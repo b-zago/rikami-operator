@@ -48,8 +48,8 @@ jobs:
 
       - name: Install kubebuilder
         run: |
-          curl -fsSL -o kubebuilder https://github.com/kubernetes-sigs/kubebuilder/releases/download/v4.15.0/kubebuilder_linux_amd64
-          sudo install kubebuilder /usr/local/bin/kubebuilder
+          curl -fsSL -o /tmp/kubebuilder https://github.com/kubernetes-sigs/kubebuilder/releases/download/v4.15.0/kubebuilder_linux_amd64
+          sudo install /tmp/kubebuilder /usr/local/bin/kubebuilder
 
       # Regenerates dist/install.yaml (via make build-installer) and dist/chart with the new image.
       - name: Update installer and Helm chart
@@ -60,6 +60,15 @@ jobs:
           rm -f .github/workflows/test-chart.yml
           yq -i '.version = strenv(TAG) | .appVersion = strenv(TAG)' dist/chart/Chart.yaml
           yq -i '.manager.image.repository = strenv(IMAGE) | .manager.image.tag = strenv(TAG)' dist/chart/values.yaml
+
+      - name: Push Helm chart to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          echo "${TOKEN}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          helm package dist/chart --destination /tmp/chart
+          helm push /tmp/chart/*.tgz "${CHART_REPO}"
 
       # Commits to whichever branch triggered the run (main or dev).
       - name: Commit changes
