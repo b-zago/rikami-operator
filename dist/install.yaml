@@ -49,7 +49,9 @@ spec:
             description: spec defines the desired state of Profile
             properties:
               autoscaling:
-                description: Autoscaling applies HPA
+                description: |-
+                  Autoscaling creates a HorizontalPodAutoscaler for the workload. When set,
+                  the HPA owns the Deployment's replica count.
                 properties:
                   maxReplicas:
                     format: int32
@@ -589,6 +591,9 @@ spec:
                     type: object
                 type: object
               scheduling:
+                description: |-
+                  Scheduling controls where pods are placed. Topology spread constraints
+                  without a labelSelector get one matching the workload's own pods.
                 properties:
                   affinity:
                     description: Affinity is a group of affinity scheduling rules.
@@ -2030,7 +2035,9 @@ spec:
                   description: VesselServer encapsulates everything
                   properties:
                     autoscaling:
-                      description: Autoscaling applies HPA
+                      description: |-
+                        Autoscaling creates a HorizontalPodAutoscaler for the workload. When set,
+                        the HPA owns the Deployment's replica count.
                       properties:
                         maxReplicas:
                           format: int32
@@ -2569,6 +2576,9 @@ spec:
                       default: false
                       type: boolean
                     scheduling:
+                      description: |-
+                        Scheduling controls where pods are placed. Topology spread constraints
+                        without a labelSelector get one matching the workload's own pods.
                       properties:
                         affinity:
                           description: Affinity is a group of affinity scheduling
@@ -3720,7 +3730,9 @@ spec:
                       items:
                         properties:
                           autoscaling:
-                            description: Autoscaling applies HPA
+                            description: |-
+                              Autoscaling creates a HorizontalPodAutoscaler for the workload. When set,
+                              the HPA owns the Deployment's replica count.
                             properties:
                               maxReplicas:
                                 format: int32
@@ -4262,6 +4274,9 @@ spec:
                                 type: object
                             type: object
                           scheduling:
+                            description: |-
+                              Scheduling controls where pods are placed. Topology spread constraints
+                              without a labelSelector get one matching the workload's own pods.
                             properties:
                               affinity:
                                 description: Affinity is a group of affinity scheduling
@@ -6352,7 +6367,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: ghcr.io/b-zago/rikami-operator/controller:1.0.3
+        image: ghcr.io/b-zago/rikami-operator/controller:1.0.4-dev.6
         livenessProbe:
           httpGet:
             path: /healthz
