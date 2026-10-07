@@ -2,17 +2,29 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore:
       - "**.md"
   workflow_dispatch:
 
+# One release at a time per branch.
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+    permissions:
+      contents: read
+
+  test:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
   release:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Bumps the semver tag (main: v0.5.0, dev: v0.5.1-dev.<run>), builds and pushes the image.
       - name: Build and push image
         id: image
         uses: b-zago/actions/build-push-ghcr@v1
@@ -48,6 +61,7 @@ jobs:
           yq -i '.version = strenv(TAG) | .appVersion = strenv(TAG)' dist/chart/Chart.yaml
           yq -i '.manager.image.repository = strenv(IMAGE) | .manager.image.tag = strenv(TAG)' dist/chart/values.yaml
 
+      # Commits to whichever branch triggered the run (main or dev).
       - name: Commit changes
         env:
           TAG: ${{ steps.image.outputs.tag }}
@@ -59,9 +73,7 @@ jobs:
           git pull --rebase
           git push
 
-      # The tag was created before the build, so it points at the commit *before* dist/ was
-      # updated. Move it onto the release commit so that checking out v<TAG> gives you
-      # install.yaml and the chart for that version.
+      # Move the tag onto the release commit so v<TAG> contains that version's dist/.
       - name: Move tag to release commit
         env:
           TAG: ${{ steps.image.outputs.tag }}
