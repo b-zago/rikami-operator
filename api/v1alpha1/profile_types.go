@@ -24,9 +24,6 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // ExternalSecretsConfig determines default configuration for ExternalSecrets resources
 type ExternalSecretsConfig struct {
 	// +required
@@ -80,6 +77,8 @@ type DatabaseConfig struct {
 	EnvKeysPrefix string `json:"envKeysPrefix"`
 }
 
+// Scheduling controls where pods are placed. Topology spread constraints
+// without a labelSelector get one matching the workload's own pods.
 type Scheduling struct {
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
@@ -91,7 +90,8 @@ type Scheduling struct {
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 }
 
-// Autoscaling applies HPA
+// Autoscaling creates a HorizontalPodAutoscaler for the workload. When set,
+// the HPA owns the Deployment's replica count.
 // +kubebuilder:validation:XValidation:rule="!has(self.minReplicas) || self.minReplicas <= self.maxReplicas",message="minReplicas must be <= maxReplicas"
 type Autoscaling struct {
 	// +optional
@@ -112,11 +112,6 @@ type Autoscaling struct {
 
 // ProfileSpec defines the desired state of Profile
 type ProfileSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	Gateway string `json:"gateway"`
@@ -160,12 +155,6 @@ type ProfileSpec struct {
 
 // ProfileStatus defines the observed state of Profile.
 type ProfileStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
 	// conditions represent the current state of the Profile resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
 	//
