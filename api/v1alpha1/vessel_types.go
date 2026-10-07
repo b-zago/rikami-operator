@@ -24,9 +24,6 @@ import (
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // ExternalSecretData type to work with secret data on ESO
 type ExternalSecretData struct {
 	// +required
@@ -80,18 +77,22 @@ type VesselWorkload struct {
 	// +required
 	Port int32 `json:"port"`
 
-	// +optional
-	UseProfileScheduling *bool `json:"useProfileScheduling,omitempty"`
+	// Profile toggles. When unset, the Vessel-wide flag of the same name applies.
+	// When the profile is in use, values set on the workload still win.
+
 	// +optional
 	UseProfileProbes *bool `json:"useProfileProbes,omitempty"`
 	// +optional
 	UseProfileResources *bool `json:"useProfileResources,omitempty"`
-	// +kubebuilder:default=false
-	UseProfileMetrics bool `json:"useProfileMetrics"`
+	// +optional
+	UseProfileScheduling *bool `json:"useProfileScheduling,omitempty"`
 	// +optional
 	UseProfileAutoscaling *bool `json:"useProfileAutoscaling,omitempty"`
-	// +optional
-	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// +kubebuilder:default=false
+	UseProfileMetrics bool `json:"useProfileMetrics"`
+
+	// Pod settings
+
 	// +optional
 	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
 	// +optional
@@ -99,21 +100,27 @@ type VesselWorkload struct {
 	// +optional
 	LivenessProbe *corev1.Probe `json:"livenessProbe,omitempty"`
 	// +optional
-	ExternalSecrets []ExternalSecret `json:"externalSecrets,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// +optional
+	Scheduling *Scheduling `json:"scheduling,omitempty"`
+	// +optional
+	Autoscaling *Autoscaling `json:"autoscaling,omitempty"`
+	// +optional
+	Metrics *Metrics `json:"metrics,omitempty"`
+
+	// Environment
+
 	// +optional
 	Envs map[string]string `json:"envs,omitempty"`
 	// +optional
 	EnvSecretRefs []string `json:"envSecretRefs,omitempty"`
 	// +optional
+	ExternalSecrets []ExternalSecret `json:"externalSecrets,omitempty"`
+
+	// +optional
 	// +listType=map
 	// +listMapKey=name
 	Databases []Database `json:"databases,omitempty"`
-	// +optional
-	Metrics *Metrics `json:"metrics,omitempty"`
-	// +optional
-	Scheduling *Scheduling `json:"scheduling,omitempty"`
-	// +optional
-	Autoscaling *Autoscaling `json:"autoscaling,omitempty"`
 }
 
 // VesselServer encapsulates everything
@@ -139,11 +146,6 @@ type VesselService struct {
 
 // VesselSpec defines the desired state of Vessel
 type VesselSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
 	// +kubebuilder:default=`default`
 	Profile string `json:"profile,omitempty"`
 	// +listType=map
@@ -164,12 +166,6 @@ type VesselSpec struct {
 
 // VesselStatus defines the observed state of Vessel.
 type VesselStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
 	// conditions represent the current state of the Vessel resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
 	//
