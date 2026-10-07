@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -69,8 +70,7 @@ var _ = Describe("Vessel Controller", func() {
 			By("Cleanup the specific resource instance Vessel")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
+		It("should default the profile and mark the Vessel degraded when the Profile is missing", func() {
 			controllerReconciler := &VesselReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
@@ -79,9 +79,16 @@ var _ = Describe("Vessel Controller", func() {
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+			Expect(err).To(HaveOccurred())
+
+			updated := &rikamiv1.Vessel{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+			Expect(updated.Spec.Profile).To(Equal("default"))
+
+			cond := meta.FindStatusCondition(updated.Status.Conditions, string(rikamiv1.ConditionTypeDegraded))
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(string(rikamiv1.ReasonProfileMissing)))
 		})
 	})
 })

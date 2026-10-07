@@ -52,6 +52,7 @@ linters:
       - linters:
           - dupl
           - lll
+          - goconst
         path: internal/*
     paths:
       - third_party$

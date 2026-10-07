@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}/controller
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and push image
+        id: image
+        uses: b-zago/actions/build-push-ghcr@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          imageName: controller
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install kubebuilder
+        run: |
+          curl -fsSL -o kubebuilder https://github.com/kubernetes-sigs/kubebuilder/releases/download/v4.15.0/kubebuilder_linux_amd64
+          sudo install kubebuilder /usr/local/bin/kubebuilder
+
+      # Regenerates dist/install.yaml (via make build-installer) and dist/chart with the new image.
+      - name: Update installer and Helm chart
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          IMG="${IMAGE}:${TAG}" kubebuilder edit --plugins=helm/v2-alpha
+          rm -f .github/workflows/test-chart.yml
+          yq -i '.version = strenv(TAG) | .appVersion = strenv(TAG)' dist/chart/Chart.yaml
+          yq -i '.manager.image.repository = strenv(IMAGE) | .manager.image.tag = strenv(TAG)' dist/chart/values.yaml
+
+      - name: Commit changes
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+          git add -A
+          git commit -m "release v${TAG}"
+          git pull --rebase
+          git push
+
+      # The tag was created before the build, so it points at the commit *before* dist/ was
+      # updated. Move it onto the release commit so that checking out v<TAG> gives you
+      # install.yaml and the chart for that version.
+      - name: Move tag to release commit
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          git tag -f "v${TAG}"
+          git push -f origin "v${TAG}"

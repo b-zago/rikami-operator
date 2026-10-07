@@ -137,7 +137,7 @@ type VesselSpec struct {
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
 	// +kubebuilder:default=`default`
-	Profile string `json:"profile"`
+	Profile string `json:"profile,omitempty"`
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=16

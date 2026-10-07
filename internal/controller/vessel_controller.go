@@ -173,7 +173,7 @@ func (r *VesselReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	vLabel := map[string]string{vesselLabel: vessel.Name}
 
 	// check status of all children here to set the current status to work on
-	// by determing what kinds to look for first
+	// by determining what kinds to look for first
 	gvks := vessel.GetOwnedGVKList()
 	resourceCount := 0
 	okCount := 0
