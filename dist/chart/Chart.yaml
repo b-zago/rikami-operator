@@ -2,8 +2,8 @@ apiVersion: v2
 name: rikami
 description: A Helm chart to distribute rikami
 type: application
-version: 1.0.4-dev.6
-appVersion: "1.0.4-dev.6"
+version: 1.0.4-dev.7
+appVersion: "1.0.4-dev.7"
 keywords:
   - kubernetes
   - operator
