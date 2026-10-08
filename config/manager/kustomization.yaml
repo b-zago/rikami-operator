@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/b-zago/rikami-operator/controller
-  newTag: 1.0.4-dev.7
+  newTag: 1.0.4
